@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<BorderPane xmlns:fx="http://javafx.com/fxml" fx:controller="com.infinitesoft.launcher.HelloController">
+    <top>
+        <VBox spacing="8.0">
+            <padding>
+                <Insets topRightBottomLeft="10.0" />
+            </padding>
+            <Label text="Gestor Market - Estado de la aplicación" style="-fx-font-size: 18px; -fx-font-weight: bold;" />
+            <HBox spacing="10.0" alignment="CENTER_LEFT">
+                <Label text="Estado General:" />
+                <Label fx:id="labelGeneralStatus" styleClass="status-label" />
+                <Pane HBox.hgrow="ALWAYS" />
+                <Button text="Iniciar TODOS" onAction="#onStartAll" />
+                <Button text="Detener TODOS" onAction="#onStopAll" />
+                <Button text="Reiniciar TODOS" onAction="#onRestartAll" />
+            </HBox>
+            <Separator />
+        </VBox>
+    </top>
+
+    <center>
+        <VBox spacing="12.0">
+            <padding>
+                <Insets topRightBottomLeft="10.0" />
+            </padding>
+            <TitledPane text="Servicios" expanded="true">
+                <content>
+                    <VBox spacing="8.0">
+                        <!-- Fila: Base de Datos (Docker Postgres) -->
+                        <HBox spacing="8.0" alignment="CENTER_LEFT">
+                            <Label text="Base de Datos (Postgres - Docker)" prefWidth="300" />
+                            <Label fx:id="statusDb" prefWidth="140" />
+                            <Button text="Iniciar" onAction="#onStartDb" />
+                            <Button text="Detener" onAction="#onStopDb" />
+                            <Button text="Reiniciar" onAction="#onRestartDb" />
+                        </HBox>
+                        <!-- Fila: Seguridad -->
+                        <HBox spacing="8.0" alignment="CENTER_LEFT">
+                            <Label text="Servicio de Seguridad" prefWidth="300" />
+                            <Label fx:id="statusSecurity" prefWidth="140" />
+                            <Button text="Iniciar" onAction="#onStartSecurity" />
+                            <Button text="Detener" onAction="#onStopSecurity" />
+                            <Button text="Reiniciar" onAction="#onRestartSecurity" />
+                        </HBox>
+                        <!-- Fila: SMTP -->
+                        <HBox spacing="8.0" alignment="CENTER_LEFT">
+                            <Label text="Servicio de Correos (SMTP)" prefWidth="300" />
+                            <Label fx:id="statusSmtp" prefWidth="140" />
+                            <Button text="Iniciar" onAction="#onStartSmtp" />
+                            <Button text="Detener" onAction="#onStopSmtp" />
+                            <Button text="Reiniciar" onAction="#onRestartSmtp" />
+                        </HBox>
+                        <!-- Fila: Lógica Tienda -->
+                        <HBox spacing="8.0" alignment="CENTER_LEFT">
+                            <Label text="Servicio Lógica Tienda" prefWidth="300" />
+                            <Label fx:id="statusStore" prefWidth="140" />
+                            <Button text="Iniciar" onAction="#onStartStore" />
+                            <Button text="Detener" onAction="#onStopStore" />
+                            <Button text="Reiniciar" onAction="#onRestartStore" />
+                        </HBox>
+                        <!-- Fila: Frontend -->
+                        <HBox spacing="8.0" alignment="CENTER_LEFT">
+                            <Label text="Aplicación Frontend" prefWidth="300" />
+                            <Label fx:id="statusFront" prefWidth="140" />
+                            <Button text="Iniciar" onAction="#onStartFront" />
+                            <Button text="Detener" onAction="#onStopFront" />
+                            <Button text="Reiniciar" onAction="#onRestartFront" />
+                        </HBox>
+                    </VBox>
+                </content>
+            </TitledPane>
+        </VBox>
+    </center>
+</BorderPane>
