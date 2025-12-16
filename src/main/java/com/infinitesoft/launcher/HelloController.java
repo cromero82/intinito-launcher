@@ -4,8 +4,13 @@ import com.infinitesoft.launcher.core.ServiceManager;
 import com.infinitesoft.launcher.core.ServiceStatus;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 
+import java.awt.Desktop;
+import java.io.File;
+import java.io.IOException;
+import java.net.URI;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -16,6 +21,7 @@ public class HelloController {
     private final ServiceManager serviceManager = new ServiceManager();
     private final ScheduledExecutorService uiRefresher = Executors.newSingleThreadScheduledExecutor();
 
+    @FXML private Button launchAppButton;
     @FXML private Label labelGeneralStatus;
     @FXML private Label statusDb;
     @FXML private Label statusSecurity;
@@ -29,6 +35,11 @@ public class HelloController {
         uiRefresher.scheduleAtFixedRate(this::refreshUI, 0, 1500, TimeUnit.MILLISECONDS);
     }
 
+    public void shutdown() {
+        serviceManager.shutdown();
+        uiRefresher.shutdownNow();
+    }
+
     private void refreshUI() {
         Map<String, ServiceStatus> map = serviceManager.snapshotStatuses();
         Platform.runLater(() -> {
@@ -38,42 +49,125 @@ public class HelloController {
             setStatusLabel(statusStore, map.getOrDefault(ServiceManager.NAME_STORE, ServiceStatus.NOT_RUNNING));
             setStatusLabel(statusFront, map.getOrDefault(ServiceManager.NAME_FRONT, ServiceStatus.NOT_RUNNING));
 
-            labelGeneralStatus.setText(computeGeneralStatus(map));
+            computeGeneralStatus(map);
+
+            boolean allRequiredRunning = map.get(ServiceManager.NAME_FRONT) == ServiceStatus.RUNNING &&
+                    map.get(ServiceManager.NAME_STORE) == ServiceStatus.RUNNING &&
+                    map.get(ServiceManager.NAME_SECURITY) == ServiceStatus.RUNNING &&
+                    map.get(ServiceManager.NAME_DB) == ServiceStatus.RUNNING;
+            launchAppButton.setDisable(!allRequiredRunning);
         });
     }
 
     private void setStatusLabel(Label label, ServiceStatus status) {
         String text;
-        switch (status) {
-            case RUNNING: text = "Ejecutándose"; break;
-            case STARTING: text = "Iniciando"; break;
-            case FAILED: text = "Falló"; break;
-            default: text = "Detenido"; break;
-        }
-        label.setText(text);
-        // Colorear fondo según estado (solo verde para Ejecutándose y rojo para Detenido)
+        String style;
         switch (status) {
             case RUNNING:
-                label.setStyle("-fx-background-color: #2e7d32; -fx-text-fill: white;");
+                text = "Ejecutándose";
+                style = "-fx-background-color: #2e7d32; -fx-text-fill: white;";
                 break;
-            case NOT_RUNNING:
-                label.setStyle("-fx-background-color: #c62828; -fx-text-fill: white;");
+            case STARTING:
+                text = "Iniciando";
+                style = "-fx-background-color: #f9a825; -fx-text-fill: white;";
+                break;
+            case FAILED:
+                text = "Falló";
+                style = "-fx-background-color: #c62828; -fx-text-fill: white;";
                 break;
             default:
-                // limpiar estilo para otros estados (Iniciando, Falló) o mantener por defecto
-                label.setStyle("");
+                text = "Detenido";
+                style = "-fx-background-color: #c62828; -fx-text-fill: white;";
+                break;
+        }
+        label.setText(text);
+        label.setStyle(style);
+    }
+
+    private void computeGeneralStatus(Map<String, ServiceStatus> map) {
+        boolean anyFailed = map.values().stream().anyMatch(s -> s == ServiceStatus.FAILED);
+        boolean anyStarting = map.values().stream().anyMatch(s -> s == ServiceStatus.STARTING);
+        boolean allRunning = map.values().stream().allMatch(s -> s == ServiceStatus.RUNNING);
+        boolean allStopped = map.values().stream().allMatch(s -> s == ServiceStatus.NOT_RUNNING);
+
+        String statusText;
+        String statusStyle;
+
+        if (allRunning) {
+            statusText = "Ejecutándose";
+            statusStyle = "-fx-background-color: #2e7d32; -fx-text-fill: white;";
+        } else if (allStopped) {
+            statusText = "Detenido";
+            statusStyle = "-fx-background-color: #c62828; -fx-text-fill: white;";
+        } else if (anyStarting) {
+            statusText = "Iniciando";
+            statusStyle = "-fx-background-color: #f9a825; -fx-text-fill: white;";
+        } else {
+            statusText = "Ejecución parcial";
+            statusStyle = "-fx-background-color: #f9a825; -fx-text-fill: white;";
+        }
+
+        if (anyFailed) {
+            statusText = "Ejecución parcial con fallos";
+            statusStyle = "-fx-background-color: #c62828; -fx-text-fill: white;";
+        }
+
+        labelGeneralStatus.setText(statusText);
+        labelGeneralStatus.setStyle(statusStyle);
+    }
+
+    @FXML
+    protected void onLaunchApp() {
+        final String url = "http://localhost:4200/login";
+        try {
+            // Intenta con Chrome
+            new ProcessBuilder("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "--app=" + url).start();
+        } catch (IOException e1) {
+            try {
+                // Si falla, intenta con Edge
+                new ProcessBuilder("C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe", "--app=" + url).start();
+            } catch (IOException e2) {
+                // Si ambos fallan, abre en el navegador por defecto
+                if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                    try {
+                        Desktop.getDesktop().browse(new URI(url));
+                    } catch (Exception e3) {
+                        // Error al abrir el navegador por defecto
+                        e3.printStackTrace();
+                    }
+                }
+            }
         }
     }
 
-    private String computeGeneralStatus(Map<String, ServiceStatus> map) {
-        boolean anyFailed = map.values().stream().anyMatch(s -> s == ServiceStatus.FAILED);
-        if (anyFailed) return "Ejecución parcial";
-        boolean anyStarting = map.values().stream().anyMatch(s -> s == ServiceStatus.STARTING);
-        if (anyStarting) return "Iniciando";
-        boolean allRunning = map.values().stream().allMatch(s -> s == ServiceStatus.RUNNING);
-        if (allRunning) return "Ejecutándose";
-        // Alguno detenido: ejecución parcial según requerimiento
-        return "Ejecución parcial";
+    @FXML
+    protected void onOpenBrowser() {
+        final String url = "http://localhost:4200/login";
+        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+            try {
+                Desktop.getDesktop().browse(new URI(url));
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    @FXML
+    protected void onOpenLogs() {
+        try {
+            Desktop.getDesktop().open(new File("C:/dev/repos/intinito-launcher/logs"));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @FXML
+    protected void onOpenDbManager() {
+        try {
+            new ProcessBuilder("C:\\Program Files\\DBeaver\\dbeaver.exe").start();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     // Botones globales
@@ -96,11 +190,6 @@ public class HelloController {
             serviceManager.startAllSequential(Duration.ofSeconds(60));
         }).start();
     }
-
-    // DB
-    @FXML protected void onStartDb() { serviceManager.start(ServiceManager.NAME_DB); }
-    @FXML protected void onStopDb() { serviceManager.stop(ServiceManager.NAME_DB); }
-    @FXML protected void onRestartDb() { serviceManager.restart(ServiceManager.NAME_DB); }
 
     // Security
     @FXML protected void onStartSecurity() { serviceManager.start(ServiceManager.NAME_SECURITY); }

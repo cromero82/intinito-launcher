@@ -1,79 +1,103 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import javafx.geometry.Insets?>
-<?import javafx.scene.control.*?>
-<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.text.Font?>
 
-<BorderPane xmlns:fx="http://javafx.com/fxml" fx:controller="com.infinitesoft.launcher.HelloController">
-    <top>
-        <VBox spacing="8.0">
+<VBox maxHeight="-Infinity" maxWidth="-Infinity" minHeight="-Infinity" minWidth="-Infinity" prefHeight="400.0" prefWidth="600.0" xmlns="http://javafx.com/javafx/11" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.infinitesoft.launcher.HelloController">
+    <children>
+        <HBox alignment="CENTER_LEFT" prefHeight="60.0" prefWidth="200.0" spacing="20.0" style="-fx-background-color: #f0f0f0;">
+            <children>
+                <Label text="Estado General:">
+                    <font>
+                        <Font name="System Bold" size="18.0" />
+                    </font>
+                </Label>
+                <Label fx:id="labelGeneralStatus" text="Iniciando">
+                    <font>
+                        <Font name="System Bold" size="18.0" />
+                    </font>
+                </Label>
+                <Button fx:id="launchAppButton" mnemonicParsing="false" onAction="#onLaunchApp" text="Ejecutar aplicacion" />
+                <Button mnemonicParsing="false" onAction="#onOpenBrowser" text="Abrir en navegador" />
+            </children>
             <padding>
-                <Insets topRightBottomLeft="10.0" />
+                <Insets left="20.0" />
             </padding>
-            <Label text="Gestor Market - Estado de la aplicación" style="-fx-font-size: 18px; -fx-font-weight: bold;" />
-            <HBox spacing="10.0" alignment="CENTER_LEFT">
-                <Label text="Estado General:" />
-                <Label fx:id="labelGeneralStatus" styleClass="status-label" />
-                <Pane HBox.hgrow="ALWAYS" />
-                <Button text="Iniciar TODOS" onAction="#onStartAll" />
-                <Button text="Detener TODOS" onAction="#onStopAll" />
-                <Button text="Reiniciar TODOS" onAction="#onRestartAll" />
-            </HBox>
-            <Separator />
-        </VBox>
-    </top>
-
-    <center>
-        <VBox spacing="12.0">
+        </HBox>
+        <ScrollPane fitToWidth="true" prefHeight="200.0" prefWidth="200.0" VBox.vgrow="ALWAYS">
+            <content>
+                <VBox fx:id="servicesContainer" spacing="10.0">
+                    <padding>
+                        <Insets bottom="10.0" left="10.0" right="10.0" top="10.0" />
+                    </padding>
+                    <children>
+                        <!-- Service: DB -->
+                        <HBox alignment="CENTER_LEFT" spacing="10.0">
+                            <children>
+                                <Label text="Base de Datos (DB)" prefWidth="150"/>
+                                <Label fx:id="statusDb" text="Detenido" prefWidth="100"/>
+                                <Button onAction="#onOpenDbManager" text="Abrir gestor DB"/>
+                            </children>
+                        </HBox>
+                        <!-- Service: Security -->
+                        <HBox alignment="CENTER_LEFT" spacing="10.0">
+                            <children>
+                                <Label text="Seguridad" prefWidth="150"/>
+                                <Label fx:id="statusSecurity" text="Detenido" prefWidth="100"/>
+                                <Button onAction="#onStartSecurity" text="Iniciar"/>
+                                <Button onAction="#onStopSecurity" text="Detener"/>
+                                <Button onAction="#onRestartSecurity" text="Reiniciar"/>
+                            </children>
+                        </HBox>
+                        <!-- Service: SMTP -->
+                        <HBox alignment="CENTER_LEFT" spacing="10.0">
+                            <children>
+                                <Label text="Correos (SMTP)" prefWidth="150"/>
+                                <Label fx:id="statusSmtp" text="Detenido" prefWidth="100"/>
+                                <Button onAction="#onStartSmtp" text="Iniciar"/>
+                                <Button onAction="#onStopSmtp" text="Detener"/>
+                                <Button onAction="#onRestartSmtp" text="Reiniciar"/>
+                            </children>
+                        </HBox>
+                        <!-- Service: Store -->
+                        <HBox alignment="CENTER_LEFT" spacing="10.0">
+                            <children>
+                                <Label text="Lógica Tienda" prefWidth="150"/>
+                                <Label fx:id="statusStore" text="Detenido" prefWidth="100"/>
+                                <Button onAction="#onStartStore" text="Iniciar"/>
+                                <Button onAction="#onStopStore" text="Detener"/>
+                                <Button onAction="#onRestartStore" text="Reiniciar"/>
+                            </children>
+                        </HBox>
+                        <!-- Service: Front -->
+                        <HBox alignment="CENTER_LEFT" spacing="10.0">
+                            <children>
+                                <Label text="Frontend" prefWidth="150"/>
+                                <Label fx:id="statusFront" text="Detenido" prefWidth="100"/>
+                                <Button onAction="#onStartFront" text="Iniciar"/>
+                                <Button onAction="#onStopFront" text="Detener"/>
+                                <Button onAction="#onRestartFront" text="Reiniciar"/>
+                            </children>
+                        </HBox>
+                    </children>
+                </VBox>
+            </content>
+        </ScrollPane>
+        <HBox alignment="CENTER_RIGHT" prefHeight="50.0" prefWidth="200.0" spacing="10.0" style="-fx-background-color: #f0f0f0;">
+            <children>
+                <Button mnemonicParsing="false" onAction="#onOpenLogs" text="Ver Logs" />
+                <Button mnemonicParsing="false" onAction="#onStartAll" text="Iniciar Todo" />
+                <Button mnemonicParsing="false" onAction="#onStopAll" text="Detener Todo" />
+                <Button mnemonicParsing="false" onAction="#onRestartAll" text="Reiniciar Todo" />
+            </children>
             <padding>
-                <Insets topRightBottomLeft="10.0" />
+                <Insets right="10.0" />
             </padding>
-            <TitledPane text="Servicios" expanded="true">
-                <content>
-                    <VBox spacing="8.0">
-                        <!-- Fila: Base de Datos (Docker Postgres) -->
-                        <HBox spacing="8.0" alignment="CENTER_LEFT">
-                            <Label text="Base de Datos (Postgres - Docker)" prefWidth="300" />
-                            <Label fx:id="statusDb" prefWidth="140" />
-                            <Button text="Iniciar" onAction="#onStartDb" />
-                            <Button text="Detener" onAction="#onStopDb" />
-                            <Button text="Reiniciar" onAction="#onRestartDb" />
-                        </HBox>
-                        <!-- Fila: Seguridad -->
-                        <HBox spacing="8.0" alignment="CENTER_LEFT">
-                            <Label text="Servicio de Seguridad" prefWidth="300" />
-                            <Label fx:id="statusSecurity" prefWidth="140" />
-                            <Button text="Iniciar" onAction="#onStartSecurity" />
-                            <Button text="Detener" onAction="#onStopSecurity" />
-                            <Button text="Reiniciar" onAction="#onRestartSecurity" />
-                        </HBox>
-                        <!-- Fila: SMTP -->
-                        <HBox spacing="8.0" alignment="CENTER_LEFT">
-                            <Label text="Servicio de Correos (SMTP)" prefWidth="300" />
-                            <Label fx:id="statusSmtp" prefWidth="140" />
-                            <Button text="Iniciar" onAction="#onStartSmtp" />
-                            <Button text="Detener" onAction="#onStopSmtp" />
-                            <Button text="Reiniciar" onAction="#onRestartSmtp" />
-                        </HBox>
-                        <!-- Fila: Lógica Tienda -->
-                        <HBox spacing="8.0" alignment="CENTER_LEFT">
-                            <Label text="Servicio Lógica Tienda" prefWidth="300" />
-                            <Label fx:id="statusStore" prefWidth="140" />
-                            <Button text="Iniciar" onAction="#onStartStore" />
-                            <Button text="Detener" onAction="#onStopStore" />
-                            <Button text="Reiniciar" onAction="#onRestartStore" />
-                        </HBox>
-                        <!-- Fila: Frontend -->
-                        <HBox spacing="8.0" alignment="CENTER_LEFT">
-                            <Label text="Aplicación Frontend" prefWidth="300" />
-                            <Label fx:id="statusFront" prefWidth="140" />
-                            <Button text="Iniciar" onAction="#onStartFront" />
-                            <Button text="Detener" onAction="#onStopFront" />
-                            <Button text="Reiniciar" onAction="#onRestartFront" />
-                        </HBox>
-                    </VBox>
-                </content>
-            </TitledPane>
-        </VBox>
-    </center>
-</BorderPane>
+        </HBox>
+    </children>
+</VBox>

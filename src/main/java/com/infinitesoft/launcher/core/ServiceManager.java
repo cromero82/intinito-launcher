@@ -1,7 +1,9 @@
 package com.infinitesoft.launcher.core;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -10,11 +12,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
+import java.util.Scanner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 public class ServiceManager {
     private final Map<String, ServiceDefinition> definitions = new LinkedHashMap<>();
@@ -28,8 +31,12 @@ public class ServiceManager {
     public static final String NAME_SMTP = "smtp";
     public static final String NAME_STORE = "store";
     public static final String NAME_FRONT = "front";
+    private static final int FRONTEND_HEALTH_PORT = 3001;
 
     public ServiceManager() {
+        // Asegurar que la regla del firewall para Java exista.
+        ensureFirewallRuleExists();
+
         String base = "C:/dev/repos";
 
         // DB via Docker container id
@@ -37,8 +44,8 @@ public class ServiceManager {
                 "Base de Datos (Postgres - Docker)",
                 ServiceType.DOCKER,
                 Path.of(base),
-                "docker start 8be3920261a9",
-                "docker stop 8be3920261a9",
+                null,
+                null,
                 null,
                 5432,
                 1
@@ -71,6 +78,7 @@ public class ServiceManager {
                 String.join(" ",
                         "java -jar",
                         "target/smtp-service-0.0.1-SNAPSHOT.jar",
+                        "--server.port=8082",
                         "--spring.mail.host=smtp.gmail.com",
                         "--spring.mail.port=587",
                         "--spring.mail.username=romeromailercarlos@gmail.com",
@@ -97,15 +105,15 @@ public class ServiceManager {
                 4
         ));
 
-        // Front (3001)
+        // Front (4200)
         definitions.put(NAME_FRONT, new ServiceDefinition(
                 "Aplicación Frontend",
                 ServiceType.NODE_NPM,
                 Path.of(base, "infinito-ai-front"),
                 "npm start",
                 null,
-                "http://localhost:3001/actuator/health",
-                3001,
+                "http://127.0.0.1:" + FRONTEND_HEALTH_PORT + "/actuator/health",
+                4200,
                 5
         ));
 
@@ -114,6 +122,39 @@ public class ServiceManager {
 
         // start monitor loop
         monitor.scheduleAtFixedRate(this::refreshStatuses, 0, 2, TimeUnit.SECONDS);
+    }
+
+    private void ensureFirewallRuleExists() {
+        final String ruleName = "Java Launcher (infinito-launcher)";
+        try {
+            String checkCommand = "Get-NetFirewallRule -DisplayName '" + ruleName + "' -ErrorAction SilentlyContinue";
+            ProcessBuilder checkProcessBuilder = new ProcessBuilder("powershell.exe", "-Command", checkCommand);
+            Process pCheck = checkProcessBuilder.start();
+            
+            BufferedReader reader = new BufferedReader(new InputStreamReader(pCheck.getInputStream()));
+            String line = reader.readLine();
+            pCheck.waitFor();
+
+            if (line != null && !line.isBlank()) {
+                System.out.println("La regla del firewall '" + ruleName + "' ya existe.");
+                return;
+            }
+
+            System.out.println("La regla del firewall no existe. Intentando crearla...");
+            String javaPath = ProcessHandle.current().info().command().orElse("java.exe").replace("'", "''");
+            
+            String createCommand = "New-NetFirewallRule -DisplayName '" + ruleName + "' -Direction Outbound -Program '" + javaPath + "' -Action Allow";
+            
+            String fullCommand = "Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command \"" + createCommand.replace("\"", "\\\"") + "\"' -Verb RunAs";
+
+            ProcessBuilder createProcess = new ProcessBuilder("powershell.exe", "-Command", fullCommand);
+            createProcess.start();
+            System.out.println("Se ha solicitado la creación de la regla del firewall. Por favor, acepte la solicitud de UAC.");
+
+        } catch (IOException | InterruptedException e) {
+            System.err.println("Error al verificar o crear la regla del firewall: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     public List<String> getServiceKeysInOrder() {
@@ -134,8 +175,8 @@ public class ServiceManager {
     public void startAllSequential(Duration perStepTimeout) {
         Executors.newSingleThreadExecutor().execute(() -> {
             for (String key : getServiceKeysInOrder()) {
+                if (key.equals(NAME_DB)) continue;
                 start(key);
-                // Wait until healthy or timeout before starting next
                 long deadline = System.currentTimeMillis() + perStepTimeout.toMillis();
                 while (System.currentTimeMillis() < deadline) {
                     if (statuses.getOrDefault(key, ServiceStatus.NOT_RUNNING) == ServiceStatus.RUNNING) break;
@@ -147,8 +188,7 @@ public class ServiceManager {
 
     public void start(String key) {
         ServiceDefinition def = definitions.get(key);
-        if (def == null) return;
-        // Si ya está saludable (aunque no lo hayamos lanzado nosotros), no iniciar de nuevo
+        if (def == null || def.getStartCommand() == null) return;
         boolean alreadyHealthy = false;
         if (def.getHealthUrl() != null) {
             alreadyHealthy = healthChecker.isHttpHealthy(def.getHealthUrl());
@@ -185,42 +225,51 @@ public class ServiceManager {
     public void stop(String key) {
         ServiceDefinition def = definitions.get(key);
         if (def == null) return;
-        try {
-            if (def.getType() == ServiceType.DOCKER && def.getStopCommand() != null) {
-                new ProcessBuilder(commandForShell(def.getName(), def.getStopCommand()))
-                        .directory(new File(def.getWorkingDir().toString()))
-                        .start();
-            } else {
-                // Para procesos con ventana CMD abierta, intentar cerrar por título y su árbol
-                killByWindowTitle(def.getName());
-            }
-        } catch (IOException ignored) {}
+
+        if (key.equals(NAME_FRONT)) {
+            System.out.println("Deteniendo servicio Frontend en puertos " + def.getTcpPort() + " y " + FRONTEND_HEALTH_PORT);
+            killProcessOnPort(def.getTcpPort());
+            killProcessOnPort(FRONTEND_HEALTH_PORT);
+        } else if (def.getType() == ServiceType.NODE_NPM && def.getTcpPort() != null) {
+            killProcessOnPort(def.getTcpPort());
+        } else {
+            try {
+                if (def.getType() == ServiceType.DOCKER && def.getStopCommand() != null) {
+                    new ProcessBuilder(commandForShell(def.getName(), def.getStopCommand()))
+                            .directory(new File(def.getWorkingDir().toString()))
+                            .start();
+                } else if (def.getStopCommand() == null) {
+                    killByWindowTitle(def.getName());
+                }
+            } catch (IOException ignored) {}
+        }
+
         Process p = processes.remove(key);
         if (p != null && p.isAlive()) {
-            // Intento amable primero
-            p.destroy();
-            try { Thread.sleep(300); } catch (InterruptedException ignored) {}
-            if (p.isAlive()) {
-                // Forzar si sigue con vida
-                p.destroyForcibly();
-            }
+            p.destroyForcibly();
         }
         statuses.put(key, ServiceStatus.NOT_RUNNING);
     }
 
     public void restart(String key) {
         stop(key);
-        // pequeña espera
-        try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+        try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
         start(key);
     }
 
     public void startAll() {
-        getServiceKeysInOrder().forEach(this::start);
+        getServiceKeysInOrder().stream().filter(key -> !key.equals(NAME_DB)).forEach(this::start);
     }
 
     public void stopAll() {
-        new ArrayList<>(definitions.keySet()).forEach(this::stop);
+        new ArrayList<>(definitions.keySet()).stream().filter(key -> !key.equals(NAME_DB)).forEach(this::stop);
+    }
+
+    public void shutdown() {
+        System.out.println("Iniciando apagado completo de ServiceManager...");
+        stopAll();
+        monitor.shutdownNow(); // Detiene el hilo de monitoreo inmediatamente.
+        System.out.println("ServiceManager apagado.");
     }
 
     private void refreshStatuses() {
@@ -231,7 +280,6 @@ public class ServiceManager {
     }
 
     private ServiceStatus computeStatus(String key, ServiceDefinition def) {
-        // If we have a process and it's alive, consider STARTING/RUNNING depending on health
         boolean alive = Optional.ofNullable(processes.get(key)).map(Process::isAlive).orElse(false);
 
         boolean healthy = false;
@@ -243,14 +291,12 @@ public class ServiceManager {
 
         if (healthy) return ServiceStatus.RUNNING;
         if (alive) return ServiceStatus.STARTING;
-        // For docker DB, even if process not tracked (docker is external), consider TCP
         if (def.getType() == ServiceType.DOCKER && def.getTcpPort() != null) {
             if (healthChecker.isTcpOpen("localhost", def.getTcpPort(), 1000)) return ServiceStatus.RUNNING;
         }
         return ServiceStatus.NOT_RUNNING;
     }
 
-    // Creates a Windows-friendly command via cmd.exe /c start "<title>" <command> (detached)
     private List<String> commandForShell(String windowTitle, String command) {
         List<String> cmd = new ArrayList<>();
         cmd.add("cmd.exe");
@@ -260,21 +306,45 @@ public class ServiceManager {
         return cmd;
     }
 
-    // Normaliza el título de ventana para Windows CMD
     private String makeSafeTitle(String windowTitle) {
         return (windowTitle == null || windowTitle.isBlank())
                 ? "svc"
                 : windowTitle.replace('"', '\'');
     }
 
-    // Intenta cerrar la ventana de consola por título y su árbol de procesos (Windows)
     private void killByWindowTitle(String windowTitle) {
         String safeTitle = makeSafeTitle(windowTitle);
         try {
-            // taskkill con filtro por título de ventana y cierre forzado del árbol
-            // Importante: el valor de /FI debe ir entre comillas para títulos con espacios
             String cmd = "taskkill /F /T /FI \"WINDOWTITLE eq " + safeTitle + "\"";
             new ProcessBuilder("cmd.exe", "/c", cmd).start();
         } catch (IOException ignored) {}
+    }
+
+    private void killProcessOnPort(int port) {
+        long ownPid = ProcessHandle.current().pid();
+        try {
+            String command = String.format("netstat -ano | findstr :%d | findstr LISTENING", port);
+            Process p = new ProcessBuilder("cmd.exe", "/c", command).start();
+            
+            new BufferedReader(new InputStreamReader(p.getInputStream())).lines().forEach(line -> {
+                String[] parts = line.trim().split("\\s+");
+                if (parts.length > 0) {
+                    try {
+                        long targetPid = Long.parseLong(parts[parts.length - 1]);
+                        if (targetPid == ownPid) {
+                            System.err.println("ADVERTENCIA: Se ha evitado la auto-terminación del launcher (PID: " + targetPid + ") en el puerto " + port);
+                            return;
+                        }
+                        System.out.println("Deteniendo proceso con PID: " + targetPid + " en el puerto " + port);
+                        new ProcessBuilder("taskkill", "/F", "/PID", String.valueOf(targetPid)).start();
+                    } catch (NumberFormatException | IOException e) {
+                        // Ignorar si la línea no es válida o hay un error al matar
+                    }
+                }
+            });
+            p.waitFor();
+        } catch (IOException | InterruptedException e) {
+            System.err.println("Error al intentar detener proceso en puerto " + port + ": " + e.getMessage());
+        }
     }
 }
