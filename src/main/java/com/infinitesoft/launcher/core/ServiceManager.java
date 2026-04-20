@@ -4,15 +4,17 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Scanner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -32,10 +34,14 @@ public class ServiceManager {
     public static final String NAME_STORE = "store";
     public static final String NAME_FRONT = "front";
     private static final int FRONTEND_HEALTH_PORT = 3001;
+    private static final Path LOGS_DIRECTORY = Path.of("C:/dev/repos/intinito-launcher/logs");
+    private static final DateTimeFormatter LOG_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+
 
     public ServiceManager() {
         // Asegurar que la regla del firewall para Java exista.
         ensureFirewallRuleExists();
+        ensureLogsDirectoryExists();
 
         String base = "C:/dev/repos";
 
@@ -98,7 +104,7 @@ public class ServiceManager {
                 "Servicio Lógica Tienda",
                 ServiceType.JAVA_JAR,
                 Path.of(base, "pos-relational-data-service"),
-                "java -jar target/pos-relational-data-service-0.0.1-SNAPSHOT.jar --logging.file.name=logica-store.log --server.port=8088",
+                "java -jar target/pos-relational-data-service-0.0.1-SNAPSHOT.jar --server.port=8088",
                 null,
                 "http://localhost:8088/actuator/health",
                 8088,
@@ -122,6 +128,15 @@ public class ServiceManager {
 
         // start monitor loop
         monitor.scheduleAtFixedRate(this::refreshStatuses, 0, 2, TimeUnit.SECONDS);
+    }
+
+    private void ensureLogsDirectoryExists() {
+        try {
+            Files.createDirectories(LOGS_DIRECTORY);
+        } catch (IOException e) {
+            System.err.println("No se pudo crear el directorio de logs: " + LOGS_DIRECTORY);
+            e.printStackTrace();
+        }
     }
 
     private void ensureFirewallRuleExists() {
@@ -206,18 +221,21 @@ public class ServiceManager {
         statuses.put(key, ServiceStatus.STARTING);
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
-                Process process;
-                ServiceType type = def.getType();
-                if (type == ServiceType.DOCKER || type == ServiceType.NODE_NPM || type == ServiceType.JAVA_JAR) {
-                    process = new ProcessBuilder(commandForShell(def.getName(), def.getStartCommand()))
-                            .directory(new File(def.getWorkingDir().toString()))
-                            .start();
-                } else {
-                    throw new IllegalStateException("Tipo no soportado");
-                }
+                String timestamp = LocalDateTime.now().format(LOG_TIMESTAMP_FORMATTER);
+                String logFileName = String.format("%s-%s.log", key, timestamp);
+                Path logFilePath = LOGS_DIRECTORY.resolve(logFileName);
+
+                String commandWithRedirection = String.format("start /B %s > \"%s\" 2>&1",
+                        def.getStartCommand(), logFilePath.toAbsolutePath());
+
+                ProcessBuilder pb = new ProcessBuilder("cmd.exe", "/c", commandWithRedirection)
+                        .directory(def.getWorkingDir().toFile());
+
+                Process process = pb.start();
                 processes.put(key, process);
             } catch (IOException e) {
                 statuses.put(key, ServiceStatus.FAILED);
+                e.printStackTrace();
             }
         });
     }
@@ -230,18 +248,9 @@ public class ServiceManager {
             System.out.println("Deteniendo servicio Frontend en puertos " + def.getTcpPort() + " y " + FRONTEND_HEALTH_PORT);
             killProcessOnPort(def.getTcpPort());
             killProcessOnPort(FRONTEND_HEALTH_PORT);
-        } else if (def.getType() == ServiceType.NODE_NPM && def.getTcpPort() != null) {
+        } else if (def.getTcpPort() != null && (def.getType() == ServiceType.NODE_NPM || def.getType() == ServiceType.JAVA_JAR)) {
+            System.out.println("Deteniendo servicio " + def.getName() + " en puerto " + def.getTcpPort());
             killProcessOnPort(def.getTcpPort());
-        } else {
-            try {
-                if (def.getType() == ServiceType.DOCKER && def.getStopCommand() != null) {
-                    new ProcessBuilder(commandForShell(def.getName(), def.getStopCommand()))
-                            .directory(new File(def.getWorkingDir().toString()))
-                            .start();
-                } else if (def.getStopCommand() == null) {
-                    killByWindowTitle(def.getName());
-                }
-            } catch (IOException ignored) {}
         }
 
         Process p = processes.remove(key);
@@ -295,29 +304,6 @@ public class ServiceManager {
             if (healthChecker.isTcpOpen("localhost", def.getTcpPort(), 1000)) return ServiceStatus.RUNNING;
         }
         return ServiceStatus.NOT_RUNNING;
-    }
-
-    private List<String> commandForShell(String windowTitle, String command) {
-        List<String> cmd = new ArrayList<>();
-        cmd.add("cmd.exe");
-        cmd.add("/c");
-        String safeTitle = makeSafeTitle(windowTitle);
-        cmd.add("start \"" + safeTitle + "\" " + command);
-        return cmd;
-    }
-
-    private String makeSafeTitle(String windowTitle) {
-        return (windowTitle == null || windowTitle.isBlank())
-                ? "svc"
-                : windowTitle.replace('"', '\'');
-    }
-
-    private void killByWindowTitle(String windowTitle) {
-        String safeTitle = makeSafeTitle(windowTitle);
-        try {
-            String cmd = "taskkill /F /T /FI \"WINDOWTITLE eq " + safeTitle + "\"";
-            new ProcessBuilder("cmd.exe", "/c", cmd).start();
-        } catch (IOException ignored) {}
     }
 
     private void killProcessOnPort(int port) {
