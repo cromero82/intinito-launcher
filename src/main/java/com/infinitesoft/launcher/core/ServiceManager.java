@@ -43,7 +43,7 @@ public class ServiceManager {
         ensureFirewallRuleExists();
         ensureLogsDirectoryExists();
 
-        String base = "C:/dev/repos";
+        String base = AppConfig.getInstance().getBasePath();
 
         // DB via Docker container id
         definitions.put(NAME_DB, new ServiceDefinition(
@@ -116,7 +116,7 @@ public class ServiceManager {
                 "Aplicación Frontend",
                 ServiceType.NODE_NPM,
                 Path.of(base, "infinito-ai-front"),
-                "npm start",
+                "npm run serve:prod",
                 null,
                 "http://127.0.0.1:" + FRONTEND_HEALTH_PORT + "/actuator/health",
                 4200,
@@ -272,6 +272,45 @@ public class ServiceManager {
 
     public void stopAll() {
         new ArrayList<>(definitions.keySet()).stream().filter(key -> !key.equals(NAME_DB)).forEach(this::stop);
+    }
+
+    public void updateProject(String key, java.util.function.Consumer<String> logCallback) {
+        ServiceDefinition def = definitions.get(key);
+        if (def == null) return;
+        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                logCallback.accept(">>> git pull");
+                runAndLog(new String[]{"cmd.exe", "/c", "git pull"}, def.getWorkingDir().toFile(), logCallback);
+
+                if (def.getType() == ServiceType.JAVA_JAR) {
+                    logCallback.accept("\n>>> mvn package -DskipTests");
+                    runAndLog(new String[]{"cmd.exe", "/c", "mvn package -DskipTests"}, def.getWorkingDir().toFile(), logCallback);
+                } else if (def.getType() == ServiceType.NODE_NPM) {
+                    logCallback.accept("\n>>> npm install");
+                    runAndLog(new String[]{"cmd.exe", "/c", "npm install"}, def.getWorkingDir().toFile(), logCallback);
+                    logCallback.accept("\n>>> npm run build  (ng build --configuration production)");
+                    runAndLog(new String[]{"cmd.exe", "/c", "npm run build"}, def.getWorkingDir().toFile(), logCallback);
+                }
+                logCallback.accept("\n=== Proceso completado ===");
+            } catch (Exception e) {
+                logCallback.accept("ERROR: " + e.getMessage());
+            }
+        });
+    }
+
+    private void runAndLog(String[] command, java.io.File workingDir, java.util.function.Consumer<String> logCallback)
+            throws IOException, InterruptedException {
+        Process process = new ProcessBuilder(command)
+                .directory(workingDir)
+                .redirectErrorStream(true)
+                .start();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                logCallback.accept(line);
+            }
+        }
+        process.waitFor();
     }
 
     public void shutdown() {

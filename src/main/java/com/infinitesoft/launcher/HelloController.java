@@ -1,11 +1,18 @@
 package com.infinitesoft.launcher;
 
+import com.infinitesoft.launcher.core.AppConfig;
 import com.infinitesoft.launcher.core.ServiceManager;
 import com.infinitesoft.launcher.core.ServiceStatus;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
+import javafx.scene.Scene;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextArea;
+import javafx.scene.layout.VBox;
+import javafx.stage.DirectoryChooser;
+import javafx.stage.Stage;
 
 import java.awt.Desktop;
 import java.io.File;
@@ -23,6 +30,7 @@ public class HelloController {
 
     @FXML private Button launchAppButton;
     @FXML private Label labelGeneralStatus;
+    @FXML private Label labelBasePath;
     @FXML private Label statusDb;
     @FXML private Label statusSecurity;
     @FXML private Label statusSmtp;
@@ -31,7 +39,7 @@ public class HelloController {
 
     @FXML
     public void initialize() {
-        // Programar refresco periódico de estados
+        labelBasePath.setText(AppConfig.getInstance().getBasePath());
         uiRefresher.scheduleAtFixedRate(this::refreshUI, 0, 1500, TimeUnit.MILLISECONDS);
     }
 
@@ -153,6 +161,24 @@ public class HelloController {
     }
 
     @FXML
+    protected void onSelectProjectsFolder() {
+        DirectoryChooser chooser = new DirectoryChooser();
+        chooser.setTitle("Seleccionar carpeta de proyectos");
+        chooser.setInitialDirectory(new File(AppConfig.getInstance().getBasePath()));
+        Stage stage = (Stage) labelBasePath.getScene().getWindow();
+        File selected = chooser.showDialog(stage);
+        if (selected != null) {
+            AppConfig.getInstance().setBasePath(selected.getAbsolutePath().replace("\\", "/"));
+            labelBasePath.setText(AppConfig.getInstance().getBasePath());
+            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+            alert.setTitle("Ruta actualizada");
+            alert.setHeaderText(null);
+            alert.setContentText("Ruta guardada. Reinicia la aplicación para aplicar los cambios.");
+            alert.showAndWait();
+        }
+    }
+
+    @FXML
     protected void onOpenLogs() {
         try {
             Desktop.getDesktop().open(new File("C:/dev/repos/intinito-launcher/logs"));
@@ -195,19 +221,57 @@ public class HelloController {
     @FXML protected void onStartSecurity() { serviceManager.start(ServiceManager.NAME_SECURITY); }
     @FXML protected void onStopSecurity() { serviceManager.stop(ServiceManager.NAME_SECURITY); }
     @FXML protected void onRestartSecurity() { serviceManager.restart(ServiceManager.NAME_SECURITY); }
+    @FXML protected void onUpdateSecurity() { openUpdateWindow("Seguridad", ServiceManager.NAME_SECURITY); }
 
     // SMTP
     @FXML protected void onStartSmtp() { serviceManager.start(ServiceManager.NAME_SMTP); }
     @FXML protected void onStopSmtp() { serviceManager.stop(ServiceManager.NAME_SMTP); }
     @FXML protected void onRestartSmtp() { serviceManager.restart(ServiceManager.NAME_SMTP); }
+    @FXML protected void onUpdateSmtp() { openUpdateWindow("Correos (SMTP)", ServiceManager.NAME_SMTP); }
 
     // Store
     @FXML protected void onStartStore() { serviceManager.start(ServiceManager.NAME_STORE); }
     @FXML protected void onStopStore() { serviceManager.stop(ServiceManager.NAME_STORE); }
     @FXML protected void onRestartStore() { serviceManager.restart(ServiceManager.NAME_STORE); }
+    @FXML protected void onUpdateStore() { openUpdateWindow("Lógica Tienda", ServiceManager.NAME_STORE); }
 
     // Front
     @FXML protected void onStartFront() { serviceManager.start(ServiceManager.NAME_FRONT); }
     @FXML protected void onStopFront() { serviceManager.stop(ServiceManager.NAME_FRONT); }
     @FXML protected void onRestartFront() { serviceManager.restart(ServiceManager.NAME_FRONT); }
+    @FXML protected void onUpdateFront() { openUpdateWindow("Frontend", ServiceManager.NAME_FRONT); }
+
+    private void openUpdateWindow(String serviceName, String serviceKey) {
+        TextArea logArea = new TextArea();
+        logArea.setEditable(false);
+        logArea.setWrapText(false);
+        logArea.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 11px;");
+
+        Button closeBtn = new Button("Cerrar");
+        closeBtn.setDisable(true);
+
+        VBox root = new VBox(8, logArea, closeBtn);
+        root.setPadding(new javafx.geometry.Insets(10));
+        logArea.setPrefHeight(400);
+
+        Stage stage = new Stage();
+        stage.setTitle("Actualizar: " + serviceName);
+        stage.setScene(new Scene(root, 700, 460));
+        stage.show();
+
+        closeBtn.setOnAction(e -> stage.close());
+
+        logArea.textProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal.contains("=== Proceso completado ===") || newVal.contains("ERROR:")) {
+                Platform.runLater(() -> closeBtn.setDisable(false));
+            }
+        });
+
+        serviceManager.updateProject(serviceKey, line ->
+                Platform.runLater(() -> {
+                    logArea.appendText(line + "\n");
+                    logArea.setScrollTop(Double.MAX_VALUE);
+                })
+        );
+    }
 }

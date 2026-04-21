@@ -52,6 +52,7 @@
                                 <Button onAction="#onStartSecurity" text="Iniciar"/>
                                 <Button onAction="#onStopSecurity" text="Detener"/>
                                 <Button onAction="#onRestartSecurity" text="Reiniciar"/>
+                                <Button onAction="#onUpdateSecurity" text="Actualizar"/>
                             </children>
                         </HBox>
                         <!-- Service: SMTP -->
@@ -62,6 +63,7 @@
                                 <Button onAction="#onStartSmtp" text="Iniciar"/>
                                 <Button onAction="#onStopSmtp" text="Detener"/>
                                 <Button onAction="#onRestartSmtp" text="Reiniciar"/>
+                                <Button onAction="#onUpdateSmtp" text="Actualizar"/>
                             </children>
                         </HBox>
                         <!-- Service: Store -->
@@ -72,6 +74,7 @@
                                 <Button onAction="#onStartStore" text="Iniciar"/>
                                 <Button onAction="#onStopStore" text="Detener"/>
                                 <Button onAction="#onRestartStore" text="Reiniciar"/>
+                                <Button onAction="#onUpdateStore" text="Actualizar"/>
                             </children>
                         </HBox>
                         <!-- Service: Front -->
@@ -82,12 +85,23 @@
                                 <Button onAction="#onStartFront" text="Iniciar"/>
                                 <Button onAction="#onStopFront" text="Detener"/>
                                 <Button onAction="#onRestartFront" text="Reiniciar"/>
+                                <Button onAction="#onUpdateFront" text="Actualizar"/>
                             </children>
                         </HBox>
                     </children>
                 </VBox>
             </content>
         </ScrollPane>
+        <HBox alignment="CENTER_LEFT" prefHeight="40.0" prefWidth="200.0" spacing="8.0" style="-fx-background-color: #e8e8e8;">
+            <children>
+                <Label text="Ruta proyectos:" style="-fx-font-size: 11px;" />
+                <Label fx:id="labelBasePath" text="" style="-fx-font-size: 11px; -fx-text-fill: #555;" />
+                <Button mnemonicParsing="false" onAction="#onSelectProjectsFolder" text="Cambiar Ruta" style="-fx-font-size: 11px;" />
+            </children>
+            <padding>
+                <Insets left="10.0" right="10.0" />
+            </padding>
+        </HBox>
         <HBox alignment="CENTER_RIGHT" prefHeight="50.0" prefWidth="200.0" spacing="10.0" style="-fx-background-color: #f0f0f0;">
             <children>
                 <Button mnemonicParsing="false" onAction="#onOpenLogs" text="Ver Logs" />
