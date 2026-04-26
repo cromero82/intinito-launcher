@@ -1,6 +1,7 @@
 package com.infinitesoft.launcher;
 
 import com.infinitesoft.launcher.core.AppConfig;
+import com.infinitesoft.launcher.core.MonitoreoManager;
 import com.infinitesoft.launcher.core.ServiceManager;
 import com.infinitesoft.launcher.core.ServiceStatus;
 import javafx.application.Platform;
@@ -36,6 +37,8 @@ public class HelloController {
     @FXML private Label statusSmtp;
     @FXML private Label statusStore;
     @FXML private Label statusFront;
+    @FXML private Label statusInflux;
+    @FXML private Label statusGrafana;
 
     @FXML
     public void initialize() {
@@ -50,15 +53,24 @@ public class HelloController {
 
     private void refreshUI() {
         Map<String, ServiceStatus> map = serviceManager.snapshotStatuses();
+        // Status del monitoreo se calcula aparte (polling HTTP nativo en MonitoreoManager)
+        MonitoreoManager monitoreo = serviceManager.getMonitoreo();
+        ServiceStatus influxStatus  = monitoreo.getInfluxStatus();
+        ServiceStatus grafanaStatus = monitoreo.getGrafanaStatus();
+
         Platform.runLater(() -> {
             setStatusLabel(statusDb, map.getOrDefault(ServiceManager.NAME_DB, ServiceStatus.NOT_RUNNING));
             setStatusLabel(statusSecurity, map.getOrDefault(ServiceManager.NAME_SECURITY, ServiceStatus.NOT_RUNNING));
             setStatusLabel(statusSmtp, map.getOrDefault(ServiceManager.NAME_SMTP, ServiceStatus.NOT_RUNNING));
             setStatusLabel(statusStore, map.getOrDefault(ServiceManager.NAME_STORE, ServiceStatus.NOT_RUNNING));
             setStatusLabel(statusFront, map.getOrDefault(ServiceManager.NAME_FRONT, ServiceStatus.NOT_RUNNING));
+            setStatusLabel(statusInflux,  influxStatus);
+            setStatusLabel(statusGrafana, grafanaStatus);
 
             computeGeneralStatus(map);
 
+            // Monitoreo NO es requerido para habilitar "Ejecutar aplicacion"
+            // (decision de diseño: el POS funciona aunque el monitoreo este caido).
             boolean allRequiredRunning = map.get(ServiceManager.NAME_FRONT) == ServiceStatus.RUNNING &&
                     map.get(ServiceManager.NAME_STORE) == ServiceStatus.RUNNING &&
                     map.get(ServiceManager.NAME_SECURITY) == ServiceStatus.RUNNING &&
@@ -240,6 +252,66 @@ public class HelloController {
     @FXML protected void onStopFront() { serviceManager.stop(ServiceManager.NAME_FRONT); }
     @FXML protected void onRestartFront() { serviceManager.restart(ServiceManager.NAME_FRONT); }
     @FXML protected void onUpdateFront() { openUpdateWindow("Frontend", ServiceManager.NAME_FRONT); }
+
+    // ===================== Monitoreo (logs-infinito) =======================
+    // Cada accion va al hilo de fondo via *Async() para no bloquear la UI.
+    // Los scripts arrancados son idempotentes (start* no hace nada si ya UP).
+
+    @FXML protected void onStartInflux() {
+        serviceManager.getMonitoreo().startInfluxAsync(this::reportarResultadoMonitoreo);
+    }
+    @FXML protected void onStopInflux() {
+        serviceManager.getMonitoreo().stopInfluxAsync(this::reportarResultadoMonitoreo);
+    }
+    @FXML protected void onRestartInflux() {
+        serviceManager.getMonitoreo().restartInfluxAsync(this::reportarResultadoMonitoreo);
+    }
+
+    @FXML protected void onStartGrafana() {
+        serviceManager.getMonitoreo().startGrafanaAsync(this::reportarResultadoMonitoreo);
+    }
+    @FXML protected void onStopGrafana() {
+        serviceManager.getMonitoreo().stopGrafanaAsync(this::reportarResultadoMonitoreo);
+    }
+    @FXML protected void onRestartGrafana() {
+        serviceManager.getMonitoreo().restartGrafanaAsync(this::reportarResultadoMonitoreo);
+    }
+
+    @FXML protected void onOpenGrafanaDashboard() {
+        serviceManager.getMonitoreo().openGrafanaDashboard();
+    }
+
+    @FXML protected void onDiagnoseMonitoreo() {
+        // Ventana similar a la de "Actualizar" - muestra el output completo del healthcheck
+        TextArea logArea = new TextArea("Ejecutando diagnostico...\n");
+        logArea.setEditable(false);
+        logArea.setWrapText(false);
+        logArea.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 11px;");
+        Button closeBtn = new Button("Cerrar");
+        closeBtn.setDisable(true);
+        VBox root = new VBox(8, logArea, closeBtn);
+        root.setPadding(new javafx.geometry.Insets(10));
+        logArea.setPrefHeight(420);
+        Stage stage = new Stage();
+        stage.setTitle("Diagnostico - Monitoreo (logs-infinito)");
+        stage.setScene(new Scene(root, 760, 500));
+        stage.show();
+        closeBtn.setOnAction(e -> stage.close());
+
+        serviceManager.getMonitoreo().runDiagnosticoAsync(result ->
+            Platform.runLater(() -> {
+                logArea.setText(result.fullOutput);
+                logArea.appendText("\n--- exit code: " + result.exitCode + " ---");
+                logArea.setScrollTop(Double.MAX_VALUE);
+                closeBtn.setDisable(false);
+            })
+        );
+    }
+
+    /** Callback comun para acciones del monitoreo: log a stdout. */
+    private void reportarResultadoMonitoreo(MonitoreoManager.ScriptResult r) {
+        System.out.printf("[monitoreo] exit=%d  json=%s%n", r.exitCode, r.jsonSummary);
+    }
 
     private void openUpdateWindow(String serviceName, String serviceKey) {
         TextArea logArea = new TextArea();

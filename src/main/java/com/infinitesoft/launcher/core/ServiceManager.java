@@ -27,6 +27,8 @@ public class ServiceManager {
     private final Map<String, ServiceStatus> statuses = new ConcurrentHashMap<>();
     private final HealthChecker healthChecker = new HealthChecker();
     private final ScheduledExecutorService monitor = Executors.newSingleThreadScheduledExecutor();
+    /** Stack de monitoreo (InfluxDB+Grafana) gestionado via scripts logs-infinito/. */
+    private final MonitoreoManager monitoreo = new MonitoreoManager();
 
     public static final String NAME_DB = "db";
     public static final String NAME_SECURITY = "security";
@@ -189,6 +191,16 @@ public class ServiceManager {
 
     public void startAllSequential(Duration perStepTimeout) {
         Executors.newSingleThreadExecutor().execute(() -> {
+            // 0) PRIMERO el monitoreo (InfluxDB + Grafana) para no perder los
+            //    primeros logs del ms negocio. start scripts son idempotentes
+            //    y bloquean hasta que /health responda (o timeout interno).
+            try {
+                monitoreo.startAll();
+            } catch (Exception e) {
+                System.err.println("Monitoreo no pudo arrancar: " + e.getMessage());
+                // No abortamos: el POS sigue funcionando aunque el monitoreo falle.
+            }
+
             for (String key : getServiceKeysInOrder()) {
                 if (key.equals(NAME_DB)) continue;
                 start(key);
@@ -272,7 +284,13 @@ public class ServiceManager {
 
     public void stopAll() {
         new ArrayList<>(definitions.keySet()).stream().filter(key -> !key.equals(NAME_DB)).forEach(this::stop);
+        // Tambien apagar el stack de monitoreo (best-effort, no fail si error)
+        try { monitoreo.stopAll(); }
+        catch (Exception e) { System.err.println("Monitoreo stopAll: " + e.getMessage()); }
     }
+
+    /** Acceso al gestor de monitoreo (InfluxDB + Grafana). */
+    public MonitoreoManager getMonitoreo() { return monitoreo; }
 
     public void updateProject(String key, java.util.function.Consumer<String> logCallback) {
         ServiceDefinition def = definitions.get(key);
@@ -317,6 +335,7 @@ public class ServiceManager {
         System.out.println("Iniciando apagado completo de ServiceManager...");
         stopAll();
         monitor.shutdownNow(); // Detiene el hilo de monitoreo inmediatamente.
+        monitoreo.shutdown();  // Detiene el polling del MonitoreoManager.
         System.out.println("ServiceManager apagado.");
     }
 
