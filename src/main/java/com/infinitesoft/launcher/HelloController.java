@@ -38,7 +38,6 @@ public class HelloController {
     @FXML private Label statusStore;
     @FXML private Label statusFront;
     @FXML private Label statusInflux;
-    @FXML private Label statusGrafana;
 
     @FXML
     public void initialize() {
@@ -53,28 +52,25 @@ public class HelloController {
 
     private void refreshUI() {
         Map<String, ServiceStatus> map = serviceManager.snapshotStatuses();
-        // Status del monitoreo se calcula aparte (polling HTTP nativo en MonitoreoManager)
-        MonitoreoManager monitoreo = serviceManager.getMonitoreo();
-        ServiceStatus influxStatus  = monitoreo.getInfluxStatus();
-        ServiceStatus grafanaStatus = monitoreo.getGrafanaStatus();
+        ServiceStatus influxStatus = serviceManager.getMonitoreo().getInfluxStatus();
 
         Platform.runLater(() -> {
-            setStatusLabel(statusDb, map.getOrDefault(ServiceManager.NAME_DB, ServiceStatus.NOT_RUNNING));
+            setStatusLabel(statusDb,       map.getOrDefault(ServiceManager.NAME_DB,       ServiceStatus.NOT_RUNNING));
             setStatusLabel(statusSecurity, map.getOrDefault(ServiceManager.NAME_SECURITY, ServiceStatus.NOT_RUNNING));
-            setStatusLabel(statusSmtp, map.getOrDefault(ServiceManager.NAME_SMTP, ServiceStatus.NOT_RUNNING));
-            setStatusLabel(statusStore, map.getOrDefault(ServiceManager.NAME_STORE, ServiceStatus.NOT_RUNNING));
-            setStatusLabel(statusFront, map.getOrDefault(ServiceManager.NAME_FRONT, ServiceStatus.NOT_RUNNING));
-            setStatusLabel(statusInflux,  influxStatus);
-            setStatusLabel(statusGrafana, grafanaStatus);
+            setStatusLabel(statusSmtp,     map.getOrDefault(ServiceManager.NAME_SMTP,     ServiceStatus.NOT_RUNNING));
+            setStatusLabel(statusStore,    map.getOrDefault(ServiceManager.NAME_STORE,    ServiceStatus.NOT_RUNNING));
+            setStatusLabel(statusFront,    map.getOrDefault(ServiceManager.NAME_FRONT,    ServiceStatus.NOT_RUNNING));
+            setStatusLabel(statusInflux,   influxStatus);
 
             computeGeneralStatus(map);
 
             // Monitoreo NO es requerido para habilitar "Ejecutar aplicacion"
-            // (decision de diseño: el POS funciona aunque el monitoreo este caido).
-            boolean allRequiredRunning = map.get(ServiceManager.NAME_FRONT) == ServiceStatus.RUNNING &&
-                    map.get(ServiceManager.NAME_STORE) == ServiceStatus.RUNNING &&
+            // (el POS funciona aunque InfluxDB este caido).
+            boolean allRequiredRunning =
+                    map.get(ServiceManager.NAME_FRONT)    == ServiceStatus.RUNNING &&
+                    map.get(ServiceManager.NAME_STORE)    == ServiceStatus.RUNNING &&
                     map.get(ServiceManager.NAME_SECURITY) == ServiceStatus.RUNNING &&
-                    map.get(ServiceManager.NAME_DB) == ServiceStatus.RUNNING;
+                    map.get(ServiceManager.NAME_DB)       == ServiceStatus.RUNNING;
             launchAppButton.setDisable(!allRequiredRunning);
         });
     }
@@ -84,19 +80,19 @@ public class HelloController {
         String style;
         switch (status) {
             case RUNNING:
-                text = "Ejecutándose";
+                text  = "Ejecutándose";
                 style = "-fx-background-color: #2e7d32; -fx-text-fill: white;";
                 break;
             case STARTING:
-                text = "Iniciando";
+                text  = "Iniciando";
                 style = "-fx-background-color: #f9a825; -fx-text-fill: white;";
                 break;
             case FAILED:
-                text = "Falló";
+                text  = "Falló";
                 style = "-fx-background-color: #c62828; -fx-text-fill: white;";
                 break;
             default:
-                text = "Detenido";
+                text  = "Detenido";
                 style = "-fx-background-color: #c62828; -fx-text-fill: white;";
                 break;
         }
@@ -105,30 +101,30 @@ public class HelloController {
     }
 
     private void computeGeneralStatus(Map<String, ServiceStatus> map) {
-        boolean anyFailed = map.values().stream().anyMatch(s -> s == ServiceStatus.FAILED);
+        boolean anyFailed   = map.values().stream().anyMatch(s -> s == ServiceStatus.FAILED);
         boolean anyStarting = map.values().stream().anyMatch(s -> s == ServiceStatus.STARTING);
-        boolean allRunning = map.values().stream().allMatch(s -> s == ServiceStatus.RUNNING);
-        boolean allStopped = map.values().stream().allMatch(s -> s == ServiceStatus.NOT_RUNNING);
+        boolean allRunning  = map.values().stream().allMatch(s -> s == ServiceStatus.RUNNING);
+        boolean allStopped  = map.values().stream().allMatch(s -> s == ServiceStatus.NOT_RUNNING);
 
         String statusText;
         String statusStyle;
 
         if (allRunning) {
-            statusText = "Ejecutándose";
+            statusText  = "Ejecutándose";
             statusStyle = "-fx-background-color: #2e7d32; -fx-text-fill: white;";
         } else if (allStopped) {
-            statusText = "Detenido";
+            statusText  = "Detenido";
             statusStyle = "-fx-background-color: #c62828; -fx-text-fill: white;";
         } else if (anyStarting) {
-            statusText = "Iniciando";
+            statusText  = "Iniciando";
             statusStyle = "-fx-background-color: #f9a825; -fx-text-fill: white;";
         } else {
-            statusText = "Ejecución parcial";
+            statusText  = "Ejecución parcial";
             statusStyle = "-fx-background-color: #f9a825; -fx-text-fill: white;";
         }
 
         if (anyFailed) {
-            statusText = "Ejecución parcial con fallos";
+            statusText  = "Ejecución parcial con fallos";
             statusStyle = "-fx-background-color: #c62828; -fx-text-fill: white;";
         }
 
@@ -140,21 +136,14 @@ public class HelloController {
     protected void onLaunchApp() {
         final String url = "http://localhost:4200/login";
         try {
-            // Intenta con Chrome
             new ProcessBuilder("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "--app=" + url).start();
         } catch (IOException e1) {
             try {
-                // Si falla, intenta con Edge
                 new ProcessBuilder("C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe", "--app=" + url).start();
             } catch (IOException e2) {
-                // Si ambos fallan, abre en el navegador por defecto
                 if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-                    try {
-                        Desktop.getDesktop().browse(new URI(url));
-                    } catch (Exception e3) {
-                        // Error al abrir el navegador por defecto
-                        e3.printStackTrace();
-                    }
+                    try { Desktop.getDesktop().browse(new URI(url)); }
+                    catch (Exception e3) { e3.printStackTrace(); }
                 }
             }
         }
@@ -164,11 +153,8 @@ public class HelloController {
     protected void onOpenBrowser() {
         final String url = "http://localhost:4200/login";
         if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-            try {
-                Desktop.getDesktop().browse(new URI(url));
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
+            try { Desktop.getDesktop().browse(new URI(url)); }
+            catch (Exception e) { e.printStackTrace(); }
         }
     }
 
@@ -208,82 +194,58 @@ public class HelloController {
         }
     }
 
-    // Botones globales
-    @FXML
-    protected void onStartAll() {
-        serviceManager.startAllSequential(Duration.ofSeconds(60));
-    }
+    // ===================== Botones globales =================================
 
-    @FXML
-    protected void onStopAll() {
+    @FXML protected void onStartAll()   { serviceManager.startAllSequential(Duration.ofSeconds(60)); }
+    @FXML protected void onStopAll()    { serviceManager.stopAll(); }
+    @FXML protected void onRestartAll() {
         serviceManager.stopAll();
-    }
-
-    @FXML
-    protected void onRestartAll() {
-        serviceManager.stopAll();
-        // breve espera y secuencial
         new Thread(() -> {
             try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
             serviceManager.startAllSequential(Duration.ofSeconds(60));
         }).start();
     }
 
-    // Security
-    @FXML protected void onStartSecurity() { serviceManager.start(ServiceManager.NAME_SECURITY); }
-    @FXML protected void onStopSecurity() { serviceManager.stop(ServiceManager.NAME_SECURITY); }
-    @FXML protected void onRestartSecurity() { serviceManager.restart(ServiceManager.NAME_SECURITY); }
+    // ===================== Security =========================================
+    @FXML protected void onStartSecurity()  { serviceManager.start(ServiceManager.NAME_SECURITY); }
+    @FXML protected void onStopSecurity()   { serviceManager.stop(ServiceManager.NAME_SECURITY); }
+    @FXML protected void onRestartSecurity(){ serviceManager.restart(ServiceManager.NAME_SECURITY); }
     @FXML protected void onUpdateSecurity() { openUpdateWindow("Seguridad", ServiceManager.NAME_SECURITY); }
 
-    // SMTP
-    @FXML protected void onStartSmtp() { serviceManager.start(ServiceManager.NAME_SMTP); }
-    @FXML protected void onStopSmtp() { serviceManager.stop(ServiceManager.NAME_SMTP); }
+    // ===================== SMTP =============================================
+    @FXML protected void onStartSmtp()   { serviceManager.start(ServiceManager.NAME_SMTP); }
+    @FXML protected void onStopSmtp()    { serviceManager.stop(ServiceManager.NAME_SMTP); }
     @FXML protected void onRestartSmtp() { serviceManager.restart(ServiceManager.NAME_SMTP); }
-    @FXML protected void onUpdateSmtp() { openUpdateWindow("Correos (SMTP)", ServiceManager.NAME_SMTP); }
+    @FXML protected void onUpdateSmtp()  { openUpdateWindow("Correos (SMTP)", ServiceManager.NAME_SMTP); }
 
-    // Store
-    @FXML protected void onStartStore() { serviceManager.start(ServiceManager.NAME_STORE); }
-    @FXML protected void onStopStore() { serviceManager.stop(ServiceManager.NAME_STORE); }
+    // ===================== Store ============================================
+    @FXML protected void onStartStore()   { serviceManager.start(ServiceManager.NAME_STORE); }
+    @FXML protected void onStopStore()    { serviceManager.stop(ServiceManager.NAME_STORE); }
     @FXML protected void onRestartStore() { serviceManager.restart(ServiceManager.NAME_STORE); }
-    @FXML protected void onUpdateStore() { openUpdateWindow("Lógica Tienda", ServiceManager.NAME_STORE); }
+    @FXML protected void onUpdateStore()  { openUpdateWindow("Lógica Tienda", ServiceManager.NAME_STORE); }
 
-    // Front
-    @FXML protected void onStartFront() { serviceManager.start(ServiceManager.NAME_FRONT); }
-    @FXML protected void onStopFront() { serviceManager.stop(ServiceManager.NAME_FRONT); }
+    // ===================== Front ============================================
+    @FXML protected void onStartFront()   { serviceManager.start(ServiceManager.NAME_FRONT); }
+    @FXML protected void onStopFront()    { serviceManager.stop(ServiceManager.NAME_FRONT); }
     @FXML protected void onRestartFront() { serviceManager.restart(ServiceManager.NAME_FRONT); }
-    @FXML protected void onUpdateFront() { openUpdateWindow("Frontend", ServiceManager.NAME_FRONT); }
+    @FXML protected void onUpdateFront()  { openUpdateWindow("Frontend", ServiceManager.NAME_FRONT); }
 
-    // ===================== Monitoreo (logs-infinito) =======================
+    // ===================== InfluxDB (logs-infinito) =========================
     // Cada accion va al hilo de fondo via *Async() para no bloquear la UI.
-    // Los scripts arrancados son idempotentes (start* no hace nada si ya UP).
+    // Los scripts son idempotentes (start-influx no hace nada si ya esta UP).
 
     @FXML protected void onStartInflux() {
-        serviceManager.getMonitoreo().startInfluxAsync(this::reportarResultadoMonitoreo);
+        serviceManager.getMonitoreo().startInfluxAsync(this::reportarResultadoInflux);
     }
     @FXML protected void onStopInflux() {
-        serviceManager.getMonitoreo().stopInfluxAsync(this::reportarResultadoMonitoreo);
+        serviceManager.getMonitoreo().stopInfluxAsync(this::reportarResultadoInflux);
     }
     @FXML protected void onRestartInflux() {
-        serviceManager.getMonitoreo().restartInfluxAsync(this::reportarResultadoMonitoreo);
-    }
-
-    @FXML protected void onStartGrafana() {
-        serviceManager.getMonitoreo().startGrafanaAsync(this::reportarResultadoMonitoreo);
-    }
-    @FXML protected void onStopGrafana() {
-        serviceManager.getMonitoreo().stopGrafanaAsync(this::reportarResultadoMonitoreo);
-    }
-    @FXML protected void onRestartGrafana() {
-        serviceManager.getMonitoreo().restartGrafanaAsync(this::reportarResultadoMonitoreo);
-    }
-
-    @FXML protected void onOpenGrafanaDashboard() {
-        serviceManager.getMonitoreo().openGrafanaDashboard();
+        serviceManager.getMonitoreo().restartInfluxAsync(this::reportarResultadoInflux);
     }
 
     @FXML protected void onDiagnoseMonitoreo() {
-        // Ventana similar a la de "Actualizar" - muestra el output completo del healthcheck
-        TextArea logArea = new TextArea("Ejecutando diagnostico...\n");
+        TextArea logArea = new TextArea("Ejecutando diagnóstico de InfluxDB...\n");
         logArea.setEditable(false);
         logArea.setWrapText(false);
         logArea.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 11px;");
@@ -293,7 +255,7 @@ public class HelloController {
         root.setPadding(new javafx.geometry.Insets(10));
         logArea.setPrefHeight(420);
         Stage stage = new Stage();
-        stage.setTitle("Diagnostico - Monitoreo (logs-infinito)");
+        stage.setTitle("Diagnóstico - InfluxDB (logs-infinito)");
         stage.setScene(new Scene(root, 760, 500));
         stage.show();
         closeBtn.setOnAction(e -> stage.close());
@@ -308,10 +270,128 @@ public class HelloController {
         );
     }
 
-    /** Callback comun para acciones del monitoreo: log a stdout. */
-    private void reportarResultadoMonitoreo(MonitoreoManager.ScriptResult r) {
-        System.out.printf("[monitoreo] exit=%d  json=%s%n", r.exitCode, r.jsonSummary);
+    /**
+     * Callback para acciones de InfluxDB.
+     * Si el script falla (exit != 0) muestra una ventana con el output completo
+     * para que el usuario pueda diagnosticar el problema.
+     */
+    private void reportarResultadoInflux(MonitoreoManager.ScriptResult r) {
+        System.out.printf("[influx] exit=%d  json=%s%n", r.exitCode, r.jsonSummary);
+        if (!r.isOk()) {
+            Platform.runLater(() -> mostrarErrorInflux(r));
+        }
     }
+
+    private void mostrarErrorInflux(MonitoreoManager.ScriptResult r) {
+        TextArea logArea = new TextArea(r.fullOutput);
+        logArea.setEditable(false);
+        logArea.setWrapText(false);
+        logArea.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 11px;");
+        logArea.appendText("\n--- exit code: " + r.exitCode + " ---");
+
+        Button closeBtn = new Button("Cerrar");
+        VBox root = new VBox(8, logArea, closeBtn);
+        root.setPadding(new javafx.geometry.Insets(10));
+        logArea.setPrefHeight(400);
+
+        Stage stage = new Stage();
+        stage.setTitle("⚠ InfluxDB - Error al ejecutar script");
+        stage.setScene(new Scene(root, 760, 480));
+        stage.show();
+        closeBtn.setOnAction(e -> stage.close());
+    }
+
+    // ===================== Scripts Administrador ============================
+
+    @FXML
+    protected void onOpenAdminScripts() {
+        String base = AppConfig.getInstance().getBasePath().replace("/", "\\");
+
+        String scriptCertificado =
+            "$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject \"CN=Infinito POS, O=Mi Tienda, C=CO\" " +
+            "-KeyUsage DigitalSignature -FriendlyName \"Infinito POS LocalSign\" " +
+            "-CertStoreLocation \"Cert:\\CurrentUser\\My\" -NotAfter (Get-Date).AddYears(5); " +
+            "$s1 = New-Object System.Security.Cryptography.X509Certificates.X509Store(\"Root\",\"LocalMachine\"); " +
+            "$s1.Open(\"ReadWrite\"); $s1.Add($cert); $s1.Close(); " +
+            "$s2 = New-Object System.Security.Cryptography.X509Certificates.X509Store(\"TrustedPublisher\",\"LocalMachine\"); " +
+            "$s2.Open(\"ReadWrite\"); $s2.Add($cert); $s2.Close(); " +
+            "$pw = ConvertTo-SecureString -String \"InfinitoPOS2024!\" -Force -AsPlainText; " +
+            "Export-PfxCertificate -Cert $cert -FilePath \"C:\\infinito-pos-sign.pfx\" -Password $pw; " +
+            "Write-Host \"Listo! Thumbprint: $($cert.Thumbprint)\"";
+
+        String scriptDesbloquearScript =
+            "Unblock-File -Path \"" + base + "\\logs-infinito\\scripts\\start-influx.ps1\"; Write-Host \"Script desbloqueado OK\"";
+
+        String scriptDesbloquearInflux =
+            "Get-ChildItem \"" + base + "\\logs-infinito\" -Recurse -Filter \"influxdb3.exe\" " +
+            "-ErrorAction SilentlyContinue | ForEach-Object { Unblock-File -Path $_.FullName; Write-Host \"Desbloqueado: $($_.FullName)\" }; " +
+            "Write-Host \"influxdb3 desbloqueado OK\"";
+
+        String scriptVerificarZona =
+            "Get-ChildItem \"" + base + "\\logs-infinito\" -Recurse -Include \"*.exe\",\"*.ps1\" " +
+            "-ErrorAction SilentlyContinue | ForEach-Object { " +
+            "$zone = Get-Item $_.FullName -Stream \"Zone.Identifier\" -ErrorAction SilentlyContinue; " +
+            "if ($zone) { Write-Host \"BLOQUEADO: $($_.FullName)\" } }";
+
+        javafx.scene.layout.VBox root = new javafx.scene.layout.VBox(12);
+        root.setPadding(new javafx.geometry.Insets(15));
+        root.setStyle("-fx-background-color: #fafafa;");
+
+        Label titulo = new Label("Scripts de Administración - PowerShell (ejecutar como Administrador)");
+        titulo.setStyle("-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #333;");
+        Label instruccion = new Label("Copia cada script y pégalo en PowerShell abierto como Administrador.");
+        instruccion.setStyle("-fx-font-size: 11px; -fx-text-fill: #666;");
+
+        root.getChildren().addAll(titulo, instruccion, new javafx.scene.control.Separator());
+
+        root.getChildren().add(crearSeccionScript(
+            "1. Crear certificado autofirmado y confiar localmente (resolver apps bloqueadas por firma desconocida)",
+            scriptCertificado));
+
+        root.getChildren().add(crearSeccionScript(
+            "2. Desbloquear script de arranque InfluxDB (Zone.Identifier de Windows)",
+            scriptDesbloquearScript));
+
+        root.getChildren().add(crearSeccionScript(
+            "3. Desbloquear ejecutable influxdb3.exe",
+            scriptDesbloquearInflux));
+
+        root.getChildren().add(crearSeccionScript(
+            "4. Verificar archivos aún bloqueados por Windows en logs-infinito",
+            scriptVerificarZona));
+
+        Button cerrarBtn = new Button("Cerrar");
+        cerrarBtn.setStyle("-fx-background-color: #5c6bc0; -fx-text-fill: white;");
+        javafx.scene.layout.HBox footer = new javafx.scene.layout.HBox(cerrarBtn);
+        footer.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
+        root.getChildren().add(footer);
+
+        javafx.scene.control.ScrollPane scroll = new javafx.scene.control.ScrollPane(root);
+        scroll.setFitToWidth(true);
+
+        Stage stage = new Stage();
+        stage.setTitle("Scripts Administrador - Infinito POS");
+        stage.setScene(new Scene(scroll, 820, 560));
+        stage.show();
+        cerrarBtn.setOnAction(e -> stage.close());
+    }
+
+    private javafx.scene.layout.VBox crearSeccionScript(String descripcion, String script) {
+        Label label = new Label(descripcion);
+        label.setStyle("-fx-font-size: 11px; -fx-font-weight: bold; -fx-text-fill: #444; -fx-wrap-text: true;");
+        label.setMaxWidth(780);
+
+        TextArea area = new TextArea(script);
+        area.setEditable(false);
+        area.setWrapText(true);
+        area.setPrefHeight(80);
+        area.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 10px; -fx-background-color: #1e1e1e; -fx-text-fill: #d4d4d4;");
+
+        javafx.scene.layout.VBox box = new javafx.scene.layout.VBox(4, label, area);
+        return box;
+    }
+
+    // ===================== Helpers ==========================================
 
     private void openUpdateWindow(String serviceName, String serviceKey) {
         TextArea logArea = new TextArea();
@@ -340,10 +420,10 @@ public class HelloController {
         });
 
         serviceManager.updateProject(serviceKey, line ->
-                Platform.runLater(() -> {
-                    logArea.appendText(line + "\n");
-                    logArea.setScrollTop(Double.MAX_VALUE);
-                })
+            Platform.runLater(() -> {
+                logArea.appendText(line + "\n");
+                logArea.setScrollTop(Double.MAX_VALUE);
+            })
         );
     }
 }

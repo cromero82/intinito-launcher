@@ -332,11 +332,12 @@ public class ServiceManager {
     }
 
     public void shutdown() {
-        System.out.println("Iniciando apagado completo de ServiceManager...");
-        stopAll();
-        monitor.shutdownNow(); // Detiene el hilo de monitoreo inmediatamente.
-        monitoreo.shutdown();  // Detiene el polling del MonitoreoManager.
-        System.out.println("ServiceManager apagado.");
+        // Solo detenemos los hilos internos del launcher.
+        // Los servicios (Java, Node, InfluxDB) permanecen corriendo de forma independiente.
+        System.out.println("Cerrando launcher - los servicios permanecen activos.");
+        monitor.shutdownNow();
+        monitoreo.shutdown();
+        System.out.println("Launcher cerrado.");
     }
 
     private void refreshStatuses() {

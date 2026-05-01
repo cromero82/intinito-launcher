@@ -23,7 +23,7 @@ public class HelloApplication extends Application {
 
     @Override
     public void stop() throws Exception {
-        System.out.println("Cerrando la aplicación. Ejecutando apagado de servicios...");
+        System.out.println("Cerrando launcher. Los servicios continúan corriendo en segundo plano.");
         if (controller != null) {
             controller.shutdown();
         }

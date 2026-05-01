@@ -99,18 +99,7 @@
                                 <Button onAction="#onStartInflux" text="Iniciar"/>
                                 <Button onAction="#onStopInflux" text="Detener"/>
                                 <Button onAction="#onRestartInflux" text="Reiniciar"/>
-                            </children>
-                        </HBox>
-                        <!-- Service: Grafana (logs-infinito) -->
-                        <HBox alignment="CENTER_LEFT" spacing="10.0">
-                            <children>
-                                <Label text="Grafana (Monitoreo)" prefWidth="150"/>
-                                <Label fx:id="statusGrafana" text="Detenido" prefWidth="100"/>
-                                <Button onAction="#onStartGrafana" text="Iniciar"/>
-                                <Button onAction="#onStopGrafana" text="Detener"/>
-                                <Button onAction="#onRestartGrafana" text="Reiniciar"/>
-                                <Button onAction="#onOpenGrafanaDashboard" text="Abrir Dashboard"/>
-                                <Button onAction="#onDiagnoseMonitoreo" text="Diagnostico"/>
+                                <Button onAction="#onDiagnoseMonitoreo" text="Diagnóstico"/>
                             </children>
                         </HBox>
                     </children>
@@ -130,6 +119,7 @@
         <HBox alignment="CENTER_RIGHT" prefHeight="50.0" prefWidth="200.0" spacing="10.0" style="-fx-background-color: #f0f0f0;">
             <children>
                 <Button mnemonicParsing="false" onAction="#onOpenLogs" text="Ver Logs" />
+                <Button mnemonicParsing="false" onAction="#onOpenAdminScripts" text="Scripts Admin" style="-fx-background-color: #5c6bc0; -fx-text-fill: white;" />
                 <Button mnemonicParsing="false" onAction="#onStartAll" text="Iniciar Todo" />
                 <Button mnemonicParsing="false" onAction="#onStopAll" text="Detener Todo" />
                 <Button mnemonicParsing="false" onAction="#onRestartAll" text="Reiniciar Todo" />
