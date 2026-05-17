@@ -307,6 +307,73 @@ public class HelloController {
     protected void onOpenAdminScripts() {
         String base = AppConfig.getInstance().getBasePath().replace("/", "\\");
 
+        // ----- Script #1 (NUEVO): instalacion de InfluxDB en laptop nuevo ----
+        // All-in-one e idempotente. Hace en orden:
+        //   a) Verifica que influxdb3.exe exista (si no, instruye al usuario).
+        //   b) Unblock-File de todos los .exe/.ps1 de logs-infinito (Zone.Identifier).
+        //   c) Crea object-store y carpeta logs.
+        //   d) Mata cualquier influxdb3 viejo y arranca uno nuevo en background.
+        //   e) Espera /health hasta 45s.
+        //   f) Crea la database 'infinito_logs' con retencion 90d (409 = OK).
+        //   g) "Seed" de schema: escribe 1 linea dummy de cada measurement con
+        //      TODOS los tags+fields. Esto evita el gotcha de schema dinamico
+        //      de InfluxDB 3 (los queries del componente Angular fallarian si
+        //      una columna nunca se escribio). Ver AI-ONBOARDING.md gotcha A.
+        //   h) Reporta resultado.
+        String scriptInstalarInflux =
+            "$ErrorActionPreference = 'Stop'; " +
+            "$base = \"" + base + "\"; " +
+            "$influxHome = \"$base\\logs-infinito\\influxdb3-core-3.9.1-windows_amd64\"; " +
+            "$influxBin  = \"$influxHome\\influxdb3.exe\"; " +
+            "$objectDir  = \"$influxHome\\object-store\"; " +
+            "$logsDir    = \"$base\\logs-infinito\\logs\"; " +
+            "$db         = 'infinito_logs'; " +
+            "$retention  = '90d'; " +
+            "$bind       = '127.0.0.1:8181'; " +
+            "if (-not (Test-Path $influxBin)) { " +
+            "  Write-Host \"FALTA $influxBin\" -ForegroundColor Red; " +
+            "  Write-Host 'Descomprime la release oficial influxdb3-core-3.9.1-windows_amd64 en logs-infinito\\ y reintenta.' -ForegroundColor Yellow; " +
+            "  return " +
+            "} " +
+            "Write-Host '==> 1/7 Desbloqueando archivos (Zone.Identifier)...' -ForegroundColor Cyan; " +
+            "Get-ChildItem \"$base\\logs-infinito\" -Recurse -Include '*.exe','*.ps1' -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue; " +
+            "Write-Host '==> 2/7 Creando carpetas de datos...' -ForegroundColor Cyan; " +
+            "New-Item -ItemType Directory -Force -Path $objectDir,$logsDir | Out-Null; " +
+            "Write-Host '==> 3/7 Matando instancias previas de influxdb3...' -ForegroundColor Cyan; " +
+            "Get-Process -Name 'influxdb3' -ErrorAction SilentlyContinue | Stop-Process -Force; " +
+            "Start-Sleep -Milliseconds 600; " +
+            "Write-Host '==> 4/7 Arrancando InfluxDB en background...' -ForegroundColor Cyan; " +
+            "Start-Process -FilePath $influxBin -WorkingDirectory $influxHome " +
+            "-ArgumentList @('serve','--node-id','node1','--object-store','file','--data-dir',$objectDir,'--http-bind',$bind,'--without-auth') " +
+            "-WindowStyle Hidden -RedirectStandardOutput \"$logsDir\\influxdb-install.log\" -RedirectStandardError \"$logsDir\\influxdb-install.err\"; " +
+            "Write-Host '==> 5/7 Esperando /health (hasta 45s)...' -ForegroundColor Cyan; " +
+            "$ready = $false; for ($i=0; $i -lt 60; $i++) { try { $r = Invoke-WebRequest -Uri \"http://$bind/health\" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop; if ($r.StatusCode -eq 200) { $ready=$true; break } } catch {}; Start-Sleep -Milliseconds 750 }; " +
+            "if (-not $ready) { Write-Host '!! InfluxDB no respondio en 45s. Revisa $logsDir\\influxdb-install.err' -ForegroundColor Red; return }; " +
+            "Write-Host \"    OK InfluxDB UP en http://$bind\" -ForegroundColor Green; " +
+            "Write-Host '==> 6/7 Creando database (idempotente)...' -ForegroundColor Cyan; " +
+            "try { " +
+            "  $body = @{ db = $db; retention_period = $retention } | ConvertTo-Json -Compress; " +
+            "  Invoke-WebRequest -Uri \"http://$bind/api/v3/configure/database\" -Method POST -Body $body -ContentType 'application/json' -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop | Out-Null; " +
+            "  Write-Host \"    OK database '$db' creada con retencion $retention\" -ForegroundColor Green " +
+            "} catch { " +
+            "  if ($_.Exception.Response.StatusCode.value__ -eq 409) { Write-Host \"    OK database '$db' ya existia\" -ForegroundColor Green } " +
+            "  else { Write-Host \"!! creando database: $($_.Exception.Message)\" -ForegroundColor Red; return } " +
+            "}; " +
+            "Write-Host '==> 7/7 Seed del schema (registra todos los tags/fields)...' -ForegroundColor Cyan; " +
+            "$ts = ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - 60000) * 1000000; " +
+            "$lp = \"backend_log,app=pos-negocio,level=INFO,logger=Installer,thread=ps message=`\"schema seed`\",exception=`\"`\" $ts`nfrontend_error,app=pos-frontend,url=/seed,error_type=Seed error=`\"schema seed`\",actividad=`\"installer`\",reporte_id=`\"seed-init`\" $ts\"; " +
+            "Invoke-WebRequest -Uri \"http://$bind/api/v3/write_lp?db=$db&precision=ns\" -Method POST -Body $lp -ContentType 'text/plain' -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop | Out-Null; " +
+            "Write-Host '    OK schema backend_log + frontend_error inicializado' -ForegroundColor Green; " +
+            "Write-Host ''; " +
+            "Write-Host '==================================================' -ForegroundColor Green; " +
+            "Write-Host '  INSTALACION COMPLETA' -ForegroundColor Green; " +
+            "Write-Host \"  Database  : $db (retencion $retention)\"; " +
+            "Write-Host \"  HTTP      : http://$bind\"; " +
+            "Write-Host \"  Logs      : $logsDir\"; " +
+            "Write-Host '==================================================' -ForegroundColor Green; " +
+            "Write-Host 'InfluxDB queda corriendo en background. Para detener:'; " +
+            "Write-Host '  Get-Process influxdb3 | Stop-Process -Force'";
+
         String scriptCertificado =
             "$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject \"CN=Infinito POS, O=Mi Tienda, C=CO\" " +
             "-KeyUsage DigitalSignature -FriendlyName \"Infinito POS LocalSign\" " +
@@ -344,20 +411,52 @@ public class HelloController {
 
         root.getChildren().addAll(titulo, instruccion, new javafx.scene.control.Separator());
 
+        // Ayuda inline para el script de instalacion: troubleshooting + checks de validacion.
+        // Va dentro de la propia ventana porque este script es el mas critico para un laptop nuevo.
+        String ayudaInstalar =
+            "SI FALLA:\n" +
+            "  - 'FALTA <path>\\influxdb3.exe'  ->  la release no esta descomprimida en logs-infinito\\.\n" +
+            "                                       Descomprime influxdb3-core-3.9.1-windows_amd64.zip ahi y reintenta.\n" +
+            "  - 'InfluxDB no respondio en 45s' ->  revisa el log de error:\n" +
+            "                                       " + base + "\\logs-infinito\\logs\\influxdb-install.err\n" +
+            "  - 'creando database: <error>'    ->  cualquier error distinto a 409 (ya existe).\n" +
+            "                                       Verifica que el puerto 8181 no este ocupado por otra app.\n" +
+            "\n" +
+            "PARA PROBAR (despues de ejecutar el script, en otra consola):\n" +
+            "  curl http://127.0.0.1:8181/health\n" +
+            "    -> debe responder: OK\n" +
+            "\n" +
+            "  curl -G \"http://127.0.0.1:8181/api/v3/query_sql\" --data-urlencode \"db=infinito_logs\" ^\n" +
+            "       --data-urlencode \"q=SELECT COUNT(*) FROM backend_log\" --data-urlencode \"format=jsonl\"\n" +
+            "    -> debe devolver al menos 1 (la linea seed).\n" +
+            "\n" +
+            "  curl -G \"http://127.0.0.1:8181/api/v3/query_sql\" --data-urlencode \"db=infinito_logs\" ^\n" +
+            "       --data-urlencode \"q=SELECT COUNT(*) FROM frontend_error\" --data-urlencode \"format=jsonl\"\n" +
+            "    -> debe devolver al menos 1 (la linea seed de frontend_error).\n" +
+            "\n" +
+            "PARA DETENER InfluxDB:  Get-Process influxdb3 | Stop-Process -Force\n" +
+            "PARA REARRANCAR:        Pulsa 'Iniciar' en la fila 'InfluxDB (Monitoreo)' del launcher,\n" +
+            "                        o ejecuta logs-infinito\\scripts\\start-influx.ps1.";
+
         root.getChildren().add(crearSeccionScript(
-            "1. Crear certificado autofirmado y confiar localmente (resolver apps bloqueadas por firma desconocida)",
+            "1. Instalar InfluxDB en este laptop (all-in-one: desbloquea, arranca, crea database 'infinito_logs' con retencion 90d, y registra el schema de backend_log + frontend_error)",
+            scriptInstalarInflux,
+            ayudaInstalar));
+
+        root.getChildren().add(crearSeccionScript(
+            "2. Crear certificado autofirmado y confiar localmente (resolver apps bloqueadas por firma desconocida)",
             scriptCertificado));
 
         root.getChildren().add(crearSeccionScript(
-            "2. Desbloquear script de arranque InfluxDB (Zone.Identifier de Windows)",
+            "3. Desbloquear script de arranque InfluxDB (Zone.Identifier de Windows)",
             scriptDesbloquearScript));
 
         root.getChildren().add(crearSeccionScript(
-            "3. Desbloquear ejecutable influxdb3.exe",
+            "4. Desbloquear ejecutable influxdb3.exe",
             scriptDesbloquearInflux));
 
         root.getChildren().add(crearSeccionScript(
-            "4. Verificar archivos aún bloqueados por Windows en logs-infinito",
+            "5. Verificar archivos aún bloqueados por Windows en logs-infinito",
             scriptVerificarZona));
 
         Button cerrarBtn = new Button("Cerrar");
@@ -377,6 +476,16 @@ public class HelloController {
     }
 
     private javafx.scene.layout.VBox crearSeccionScript(String descripcion, String script) {
+        return crearSeccionScript(descripcion, script, null);
+    }
+
+    /**
+     * Versión con texto de ayuda opcional que se muestra debajo del script.
+     * Útil para incluir instrucciones de troubleshooting y validación al lado
+     * del script copiable, sin contaminar el contenido que el usuario va a pegar
+     * en PowerShell.
+     */
+    private javafx.scene.layout.VBox crearSeccionScript(String descripcion, String script, String ayuda) {
         Label label = new Label(descripcion);
         label.setStyle("-fx-font-size: 11px; -fx-font-weight: bold; -fx-text-fill: #444; -fx-wrap-text: true;");
         label.setMaxWidth(780);
@@ -388,6 +497,17 @@ public class HelloController {
         area.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 10px; -fx-background-color: #1e1e1e; -fx-text-fill: #d4d4d4;");
 
         javafx.scene.layout.VBox box = new javafx.scene.layout.VBox(4, label, area);
+
+        if (ayuda != null && !ayuda.isEmpty()) {
+            TextArea ayudaArea = new TextArea(ayuda);
+            ayudaArea.setEditable(false);
+            ayudaArea.setWrapText(true);
+            ayudaArea.setPrefHeight(140);
+            ayudaArea.setStyle("-fx-font-family: 'Consolas'; -fx-font-size: 10px; "
+                    + "-fx-background-color: #fff8e1; -fx-text-fill: #555; "
+                    + "-fx-control-inner-background: #fff8e1;");
+            box.getChildren().add(ayudaArea);
+        }
         return box;
     }
 
