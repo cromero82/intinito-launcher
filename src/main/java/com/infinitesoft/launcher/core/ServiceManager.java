@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -27,6 +28,7 @@ public class ServiceManager {
     private final Map<String, ServiceStatus> statuses = new ConcurrentHashMap<>();
     private final HealthChecker healthChecker = new HealthChecker();
     private final ScheduledExecutorService monitor = Executors.newSingleThreadScheduledExecutor();
+    private final ExecutorService startExecutor = Executors.newCachedThreadPool();
 
     public static final String NAME_DB = "db";
     public static final String NAME_SECURITY = "security";
@@ -34,13 +36,13 @@ public class ServiceManager {
     public static final String NAME_STORE = "store";
     public static final String NAME_FRONT = "front";
     private static final int FRONTEND_HEALTH_PORT = 3001;
-    private static final Path LOGS_DIRECTORY = Path.of("C:/dev/repos/intinito-launcher/logs");
+    private static final Path LOGS_DIRECTORY = Path.of(System.getProperty("user.home"), ".infinitesoft/logs");
     private static final DateTimeFormatter LOG_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    private static final String JAVA_BIN_DIR = discoverJavaBinDir();
+    private static final String MAVEN_CMD = discoverMvnCommand();
 
 
     public ServiceManager() {
-        // Asegurar que la regla del firewall para Java exista.
-        ensureFirewallRuleExists();
         ensureLogsDirectoryExists();
 
         String base = AppConfig.getInstance().getBasePath();
@@ -50,8 +52,8 @@ public class ServiceManager {
                 "Base de Datos (Postgres - Docker)",
                 ServiceType.DOCKER,
                 Path.of(base),
-                null,
-                null,
+                "docker start postgres-pos",
+                "docker stop postgres-pos",
                 null,
                 5432,
                 1
@@ -139,37 +141,9 @@ public class ServiceManager {
         }
     }
 
+    @SuppressWarnings("unused")
     private void ensureFirewallRuleExists() {
-        final String ruleName = "Java Launcher (infinito-launcher)";
-        try {
-            String checkCommand = "Get-NetFirewallRule -DisplayName '" + ruleName + "' -ErrorAction SilentlyContinue";
-            ProcessBuilder checkProcessBuilder = new ProcessBuilder("powershell.exe", "-Command", checkCommand);
-            Process pCheck = checkProcessBuilder.start();
-            
-            BufferedReader reader = new BufferedReader(new InputStreamReader(pCheck.getInputStream()));
-            String line = reader.readLine();
-            pCheck.waitFor();
-
-            if (line != null && !line.isBlank()) {
-                System.out.println("La regla del firewall '" + ruleName + "' ya existe.");
-                return;
-            }
-
-            System.out.println("La regla del firewall no existe. Intentando crearla...");
-            String javaPath = ProcessHandle.current().info().command().orElse("java.exe").replace("'", "''");
-            
-            String createCommand = "New-NetFirewallRule -DisplayName '" + ruleName + "' -Direction Outbound -Program '" + javaPath + "' -Action Allow";
-            
-            String fullCommand = "Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command \"" + createCommand.replace("\"", "\\\"") + "\"' -Verb RunAs";
-
-            ProcessBuilder createProcess = new ProcessBuilder("powershell.exe", "-Command", fullCommand);
-            createProcess.start();
-            System.out.println("Se ha solicitado la creación de la regla del firewall. Por favor, acepte la solicitud de UAC.");
-
-        } catch (IOException | InterruptedException e) {
-            System.err.println("Error al verificar o crear la regla del firewall: " + e.getMessage());
-            e.printStackTrace();
-        }
+        // No aplica en Linux; se elimina la llamada desde el constructor.
     }
 
     public List<String> getServiceKeysInOrder() {
@@ -202,34 +176,37 @@ public class ServiceManager {
     }
 
     public void start(String key) {
-        ServiceDefinition def = definitions.get(key);
-        if (def == null || def.getStartCommand() == null) return;
-        boolean alreadyHealthy = false;
-        if (def.getHealthUrl() != null) {
-            alreadyHealthy = healthChecker.isHttpHealthy(def.getHealthUrl());
-        } else if (def.getTcpPort() != null) {
-            alreadyHealthy = healthChecker.isTcpOpen("localhost", def.getTcpPort(), 1000);
-        }
-        if (alreadyHealthy) {
-            statuses.put(key, ServiceStatus.RUNNING);
-            return;
-        }
-        if (processes.containsKey(key) && processes.get(key).isAlive()) {
-            statuses.put(key, ServiceStatus.RUNNING);
-            return;
-        }
-        statuses.put(key, ServiceStatus.STARTING);
-        Executors.newSingleThreadExecutor().execute(() -> {
+        startExecutor.execute(() -> {
+            ServiceDefinition def = definitions.get(key);
+            if (def == null || def.getStartCommand() == null) return;
+            boolean alreadyHealthy = false;
+            if (def.getHealthUrl() != null) {
+                alreadyHealthy = healthChecker.isHttpHealthy(def.getHealthUrl());
+            } else if (def.getTcpPort() != null) {
+                alreadyHealthy = healthChecker.isTcpOpen("localhost", def.getTcpPort(), 1000);
+            }
+            if (alreadyHealthy) {
+                statuses.put(key, ServiceStatus.RUNNING);
+                return;
+            }
+            if (processes.containsKey(key) && processes.get(key).isAlive()) {
+                statuses.put(key, ServiceStatus.RUNNING);
+                return;
+            }
+            statuses.put(key, ServiceStatus.STARTING);
             try {
                 String timestamp = LocalDateTime.now().format(LOG_TIMESTAMP_FORMATTER);
                 String logFileName = String.format("%s-%s.log", key, timestamp);
                 Path logFilePath = LOGS_DIRECTORY.resolve(logFileName);
 
-                String commandWithRedirection = String.format("start /B %s > \"%s\" 2>&1",
-                        def.getStartCommand(), logFilePath.toAbsolutePath());
-
-                ProcessBuilder pb = new ProcessBuilder("cmd.exe", "/c", commandWithRedirection)
+                ProcessBuilder pb = new ProcessBuilder("sh", "-c",
+                        def.getStartCommand() + " > " + logFilePath.toAbsolutePath() + " 2>&1")
                         .directory(def.getWorkingDir().toFile());
+
+                if (JAVA_BIN_DIR != null) {
+                    String currentPath = pb.environment().get("PATH");
+                    pb.environment().put("PATH", JAVA_BIN_DIR + File.pathSeparator + (currentPath != null ? currentPath : ""));
+                }
 
                 Process process = pb.start();
                 processes.put(key, process);
@@ -244,7 +221,14 @@ public class ServiceManager {
         ServiceDefinition def = definitions.get(key);
         if (def == null) return;
 
-        if (key.equals(NAME_FRONT)) {
+        if (def.getType() == ServiceType.DOCKER && def.getStopCommand() != null) {
+            System.out.println("Deteniendo contenedor Docker: " + def.getStopCommand());
+            try {
+                new ProcessBuilder("sh", "-c", def.getStopCommand()).start();
+            } catch (IOException e) {
+                System.err.println("Error al detener contenedor Docker: " + e.getMessage());
+            }
+        } else if (key.equals(NAME_FRONT)) {
             System.out.println("Deteniendo servicio Frontend en puertos " + def.getTcpPort() + " y " + FRONTEND_HEALTH_PORT);
             killProcessOnPort(def.getTcpPort());
             killProcessOnPort(FRONTEND_HEALTH_PORT);
@@ -261,9 +245,11 @@ public class ServiceManager {
     }
 
     public void restart(String key) {
-        stop(key);
-        try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
-        start(key);
+        startExecutor.execute(() -> {
+            stop(key);
+            try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+            start(key);
+        });
     }
 
     public void startAll() {
@@ -280,16 +266,16 @@ public class ServiceManager {
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
                 logCallback.accept(">>> git pull");
-                runAndLog(new String[]{"cmd.exe", "/c", "git pull"}, def.getWorkingDir().toFile(), logCallback);
+                runAndLog(new String[]{"git", "pull"}, def.getWorkingDir().toFile(), logCallback, null);
 
                 if (def.getType() == ServiceType.JAVA_JAR) {
                     logCallback.accept("\n>>> mvn package -DskipTests");
-                    runAndLog(new String[]{"cmd.exe", "/c", "mvn package -DskipTests"}, def.getWorkingDir().toFile(), logCallback);
+                    runAndLog(new String[]{MAVEN_CMD, "package", "-DskipTests"}, def.getWorkingDir().toFile(), logCallback, JAVA_BIN_DIR);
                 } else if (def.getType() == ServiceType.NODE_NPM) {
                     logCallback.accept("\n>>> npm install");
-                    runAndLog(new String[]{"cmd.exe", "/c", "npm install"}, def.getWorkingDir().toFile(), logCallback);
+                    runAndLog(new String[]{"npm", "install"}, def.getWorkingDir().toFile(), logCallback, null);
                     logCallback.accept("\n>>> npm run build  (ng build --configuration production)");
-                    runAndLog(new String[]{"cmd.exe", "/c", "npm run build"}, def.getWorkingDir().toFile(), logCallback);
+                    runAndLog(new String[]{"npm", "run", "build"}, def.getWorkingDir().toFile(), logCallback, null);
                 }
                 logCallback.accept("\n=== Proceso completado ===");
             } catch (Exception e) {
@@ -298,12 +284,20 @@ public class ServiceManager {
         });
     }
 
-    private void runAndLog(String[] command, java.io.File workingDir, java.util.function.Consumer<String> logCallback)
+    private void runAndLog(String[] command, java.io.File workingDir, java.util.function.Consumer<String> logCallback, String javaBinDir)
             throws IOException, InterruptedException {
-        Process process = new ProcessBuilder(command)
+        ProcessBuilder pb = new ProcessBuilder(command)
                 .directory(workingDir)
-                .redirectErrorStream(true)
-                .start();
+                .redirectErrorStream(true);
+        if (javaBinDir != null) {
+            String currentPath = pb.environment().get("PATH");
+            pb.environment().put("PATH", javaBinDir + File.pathSeparator + (currentPath != null ? currentPath : ""));
+            String javaHome = System.getenv("JAVA_HOME");
+            if (javaHome == null && JAVA_BIN_DIR != null) {
+                pb.environment().put("JAVA_HOME", Path.of(JAVA_BIN_DIR).getParent().toString());
+            }
+        }
+        Process process = pb.start();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
             String line;
             while ((line = reader.readLine()) != null) {
@@ -313,11 +307,63 @@ public class ServiceManager {
         process.waitFor();
     }
 
+    private static String discoverMvnCommand() {
+        String mavenHome = System.getenv("MAVEN_HOME");
+        if (mavenHome != null) {
+            Path mvn = Path.of(mavenHome, "bin", "mvn");
+            if (Files.exists(mvn)) return mvn.toAbsolutePath().toString();
+        }
+        Path m2Dir = Path.of(System.getProperty("user.home"), ".m2", "wrapper", "dists");
+        if (Files.isDirectory(m2Dir)) {
+            try (var stream = Files.walk(m2Dir, 6)) {
+                Optional<Path> found = stream
+                        .filter(p -> p.endsWith("bin/mvn") && Files.isExecutable(p))
+                        .findFirst();
+                if (found.isPresent()) return found.get().toAbsolutePath().toString();
+            } catch (IOException ignored) {}
+        }
+        return "mvn";
+    }
+
+    private static String discoverJavaBinDir() {
+        String javaHome = System.getenv("JAVA_HOME");
+        if (javaHome != null) {
+            Path binDir = Path.of(javaHome, "bin");
+            if (Files.isDirectory(binDir) && Files.exists(binDir.resolve("java"))) {
+                return binDir.toAbsolutePath().toString();
+            }
+        }
+        Path jdksDir = Path.of(System.getProperty("user.home"), ".jdks");
+        if (Files.isDirectory(jdksDir)) {
+            try (var stream = Files.list(jdksDir)) {
+                List<Path> jdks = stream.filter(Files::isDirectory).sorted(Comparator.reverseOrder()).collect(Collectors.toList());
+                for (Path jdk : jdks) {
+                    Path binDir = jdk.resolve("bin");
+                    if (Files.isDirectory(binDir) && Files.exists(binDir.resolve("java"))) {
+                        return binDir.toAbsolutePath().toString();
+                    }
+                }
+            } catch (IOException ignored) {}
+        }
+        Path usrJvm = Path.of("/usr/lib/jvm");
+        if (Files.isDirectory(usrJvm)) {
+            try (var stream = Files.list(usrJvm)) {
+                List<Path> jdks = stream.filter(Files::isDirectory).sorted(Comparator.reverseOrder()).collect(Collectors.toList());
+                for (Path jdk : jdks) {
+                    Path binDir = jdk.resolve("bin");
+                    if (Files.isDirectory(binDir) && Files.exists(binDir.resolve("java"))) {
+                        return binDir.toAbsolutePath().toString();
+                    }
+                }
+            } catch (IOException ignored) {}
+        }
+        return null;
+    }
+
     public void shutdown() {
-        System.out.println("Iniciando apagado completo de ServiceManager...");
-        stopAll();
-        monitor.shutdownNow(); // Detiene el hilo de monitoreo inmediatamente.
-        System.out.println("ServiceManager apagado.");
+        System.out.println("Cerrando launcher - los servicios permanecen activos.");
+        monitor.shutdownNow();
+        System.out.println("Launcher cerrado.");
     }
 
     private void refreshStatuses() {
@@ -348,26 +394,26 @@ public class ServiceManager {
     private void killProcessOnPort(int port) {
         long ownPid = ProcessHandle.current().pid();
         try {
-            String command = String.format("netstat -ano | findstr :%d | findstr LISTENING", port);
-            Process p = new ProcessBuilder("cmd.exe", "/c", command).start();
-            
-            new BufferedReader(new InputStreamReader(p.getInputStream())).lines().forEach(line -> {
-                String[] parts = line.trim().split("\\s+");
-                if (parts.length > 0) {
+            Process finder = new ProcessBuilder("sh", "-c", "lsof -ti :" + port).start();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(finder.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty()) continue;
                     try {
-                        long targetPid = Long.parseLong(parts[parts.length - 1]);
+                        long targetPid = Long.parseLong(line);
                         if (targetPid == ownPid) {
                             System.err.println("ADVERTENCIA: Se ha evitado la auto-terminación del launcher (PID: " + targetPid + ") en el puerto " + port);
-                            return;
+                            continue;
                         }
                         System.out.println("Deteniendo proceso con PID: " + targetPid + " en el puerto " + port);
-                        new ProcessBuilder("taskkill", "/F", "/PID", String.valueOf(targetPid)).start();
+                        new ProcessBuilder("kill", "-9", String.valueOf(targetPid)).start();
                     } catch (NumberFormatException | IOException e) {
-                        // Ignorar si la línea no es válida o hay un error al matar
+                        // Ignorar
                     }
                 }
-            });
-            p.waitFor();
+            }
+            finder.waitFor();
         } catch (IOException | InterruptedException e) {
             System.err.println("Error al intentar detener proceso en puerto " + port + ": " + e.getMessage());
         }

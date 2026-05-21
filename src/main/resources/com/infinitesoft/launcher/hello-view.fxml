@@ -41,6 +41,9 @@
                             <children>
                                 <Label text="Base de Datos (DB)" prefWidth="150"/>
                                 <Label fx:id="statusDb" text="Detenido" prefWidth="100"/>
+                                <Button onAction="#onStartDb" text="Iniciar"/>
+                                <Button onAction="#onStopDb" text="Detener"/>
+                                <Button onAction="#onRestartDb" text="Reiniciar"/>
                                 <Button onAction="#onOpenDbManager" text="Abrir gestor DB"/>
                             </children>
                         </HBox>

@@ -10,7 +10,7 @@ public class AppConfig {
     private static final String CONFIG_DIR = System.getProperty("user.home") + "/.infinitesoft";
     private static final String CONFIG_FILE = CONFIG_DIR + "/launcher.properties";
     private static final String KEY_BASE_PATH = "projects.base.path";
-    private static final String DEFAULT_BASE_PATH = "C:/dev/repos";
+    private static final String DEFAULT_BASE_PATH = System.getProperty("user.home") + "/dev/repos";
 
     private static AppConfig instance;
     private final Properties props = new Properties();

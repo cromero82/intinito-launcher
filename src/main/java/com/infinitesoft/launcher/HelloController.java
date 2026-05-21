@@ -128,20 +128,20 @@ public class HelloController {
     protected void onLaunchApp() {
         final String url = "http://localhost:4200/login";
         try {
-            // Intenta con Chrome
-            new ProcessBuilder("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "--app=" + url).start();
+            new ProcessBuilder("google-chrome", "--app=" + url).start();
         } catch (IOException e1) {
             try {
-                // Si falla, intenta con Edge
-                new ProcessBuilder("C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe", "--app=" + url).start();
+                new ProcessBuilder("chromium-browser", "--app=" + url).start();
             } catch (IOException e2) {
-                // Si ambos fallan, abre en el navegador por defecto
-                if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-                    try {
-                        Desktop.getDesktop().browse(new URI(url));
-                    } catch (Exception e3) {
-                        // Error al abrir el navegador por defecto
-                        e3.printStackTrace();
+                try {
+                    new ProcessBuilder("firefox", "--new-window", url).start();
+                } catch (IOException e3) {
+                    if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                        try {
+                            Desktop.getDesktop().browse(new URI(url));
+                        } catch (Exception e4) {
+                            e4.printStackTrace();
+                        }
                     }
                 }
             }
@@ -164,7 +164,10 @@ public class HelloController {
     protected void onSelectProjectsFolder() {
         DirectoryChooser chooser = new DirectoryChooser();
         chooser.setTitle("Seleccionar carpeta de proyectos");
-        chooser.setInitialDirectory(new File(AppConfig.getInstance().getBasePath()));
+        File basePath = new File(AppConfig.getInstance().getBasePath());
+        if (basePath.isDirectory()) {
+            chooser.setInitialDirectory(basePath);
+        }
         Stage stage = (Stage) labelBasePath.getScene().getWindow();
         File selected = chooser.showDialog(stage);
         if (selected != null) {
@@ -180,8 +183,10 @@ public class HelloController {
 
     @FXML
     protected void onOpenLogs() {
+        File logsDir = new File(System.getProperty("user.home"), ".infinitesoft/logs");
+        if (!logsDir.exists()) logsDir.mkdirs();
         try {
-            Desktop.getDesktop().open(new File("C:/dev/repos/intinito-launcher/logs"));
+            Desktop.getDesktop().open(logsDir);
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -190,9 +195,13 @@ public class HelloController {
     @FXML
     protected void onOpenDbManager() {
         try {
-            new ProcessBuilder("C:\\Program Files\\DBeaver\\dbeaver.exe").start();
-        } catch (IOException e) {
-            e.printStackTrace();
+            new ProcessBuilder("dbeaver").start();
+        } catch (IOException e1) {
+            try {
+                new ProcessBuilder("dbeaver-ce").start();
+            } catch (IOException e2) {
+                e2.printStackTrace();
+            }
         }
     }
 
@@ -216,6 +225,11 @@ public class HelloController {
             serviceManager.startAllSequential(Duration.ofSeconds(60));
         }).start();
     }
+
+    // DB
+    @FXML protected void onStartDb() { serviceManager.start(ServiceManager.NAME_DB); }
+    @FXML protected void onStopDb() { serviceManager.stop(ServiceManager.NAME_DB); }
+    @FXML protected void onRestartDb() { serviceManager.restart(ServiceManager.NAME_DB); }
 
     // Security
     @FXML protected void onStartSecurity() { serviceManager.start(ServiceManager.NAME_SECURITY); }
