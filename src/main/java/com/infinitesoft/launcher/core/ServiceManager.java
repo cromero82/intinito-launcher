@@ -199,13 +199,20 @@ public class ServiceManager {
                 String logFileName = String.format("%s-%s.log", key, timestamp);
                 Path logFilePath = LOGS_DIRECTORY.resolve(logFileName);
 
+                String javaCmd = (JAVA_BIN_DIR != null) ? JAVA_BIN_DIR + File.separator + "java" : "java";
+                String fullCommand = def.getStartCommand().replaceFirst("^java\\s", javaCmd + " ");
+
                 ProcessBuilder pb = new ProcessBuilder("sh", "-c",
-                        def.getStartCommand() + " > " + logFilePath.toAbsolutePath() + " 2>&1")
+                        fullCommand + " > " + logFilePath.toAbsolutePath() + " 2>&1")
                         .directory(def.getWorkingDir().toFile());
 
                 if (JAVA_BIN_DIR != null) {
-                    String currentPath = pb.environment().get("PATH");
-                    pb.environment().put("PATH", JAVA_BIN_DIR + File.pathSeparator + (currentPath != null ? currentPath : ""));
+                    Map<String, String> env = pb.environment();
+                    String currentPath = env.get("PATH");
+                    env.put("PATH", JAVA_BIN_DIR + File.pathSeparator + (currentPath != null ? currentPath : ""));
+                    
+                    // También establecer JAVA_HOME por si el jar o scripts dependientes lo usan
+                    env.put("JAVA_HOME", Path.of(JAVA_BIN_DIR).getParent().toString());
                 }
 
                 Process process = pb.start();
@@ -266,22 +273,61 @@ public class ServiceManager {
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
                 logCallback.accept(">>> git pull");
-                runAndLog(new String[]{"git", "pull"}, def.getWorkingDir().toFile(), logCallback, null);
+                runAndLogShell("git pull", def.getWorkingDir().toFile(), logCallback, null);
 
                 if (def.getType() == ServiceType.JAVA_JAR) {
                     logCallback.accept("\n>>> mvn package -DskipTests");
-                    runAndLog(new String[]{MAVEN_CMD, "package", "-DskipTests"}, def.getWorkingDir().toFile(), logCallback, JAVA_BIN_DIR);
+                    runAndLogShell(MAVEN_CMD + " package -DskipTests", def.getWorkingDir().toFile(), logCallback, JAVA_BIN_DIR);
                 } else if (def.getType() == ServiceType.NODE_NPM) {
                     logCallback.accept("\n>>> npm install");
-                    runAndLog(new String[]{"npm", "install"}, def.getWorkingDir().toFile(), logCallback, null);
+                    runAndLogShell("npm install", def.getWorkingDir().toFile(), logCallback, null);
                     logCallback.accept("\n>>> npm run build  (ng build --configuration production)");
-                    runAndLog(new String[]{"npm", "run", "build"}, def.getWorkingDir().toFile(), logCallback, null);
+                    runAndLogShell("npm run build", def.getWorkingDir().toFile(), logCallback, null);
                 }
                 logCallback.accept("\n=== Proceso completado ===");
             } catch (Exception e) {
                 logCallback.accept("ERROR: " + e.getMessage());
             }
         });
+    }
+
+    private void runAndLogShell(String command, java.io.File workingDir, java.util.function.Consumer<String> logCallback, String javaBinDir)
+            throws IOException, InterruptedException {
+        ProcessBuilder pb = new ProcessBuilder("sh", "-c", command)
+                .directory(workingDir)
+                .redirectErrorStream(true);
+
+        Map<String, String> env = pb.environment();
+        String currentPath = env.get("PATH");
+
+        // macOS: apps GUI no heredan PATH del shell, agregar rutas estándar
+        String osName = System.getProperty("os.name").toLowerCase();
+        if (osName.contains("mac")) {
+            String macPaths = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin";
+            String combined = (currentPath != null ? currentPath + File.pathSeparator : "") + macPaths;
+            if (javaBinDir != null) {
+                combined = javaBinDir + File.pathSeparator + combined;
+            }
+            env.put("PATH", combined);
+        } else if (javaBinDir != null) {
+            env.put("PATH", javaBinDir + File.pathSeparator + (currentPath != null ? currentPath : ""));
+        }
+
+        if (javaBinDir != null) {
+            String javaHome = System.getenv("JAVA_HOME");
+            if (javaHome == null && JAVA_BIN_DIR != null) {
+                env.put("JAVA_HOME", Path.of(JAVA_BIN_DIR).getParent().toString());
+            }
+        }
+
+        Process process = pb.start();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                logCallback.accept(line);
+            }
+        }
+        process.waitFor();
     }
 
     private void runAndLog(String[] command, java.io.File workingDir, java.util.function.Consumer<String> logCallback, String javaBinDir)
@@ -333,6 +379,32 @@ public class ServiceManager {
                 return binDir.toAbsolutePath().toString();
             }
         }
+        
+        String osName = System.getProperty("os.name").toLowerCase();
+        // macOS: Check user library first, then system library
+        if (osName.contains("mac")) {
+            List<Path> macJVMPaths = List.of(
+                Path.of(System.getProperty("user.home"), "Library/Java/JavaVirtualMachines"),
+                Path.of("/Library/Java/JavaVirtualMachines")
+            );
+            for (Path macJVMs : macJVMPaths) {
+                if (Files.isDirectory(macJVMs)) {
+                    try (var stream = Files.list(macJVMs)) {
+                        List<Path> jdks = stream
+                            .filter(Files::isDirectory)
+                            .sorted(Comparator.reverseOrder())
+                            .collect(Collectors.toList());
+                        for (Path jdk : jdks) {
+                            Path binDir = jdk.resolve("Contents/Home/bin");
+                            if (Files.isDirectory(binDir) && Files.exists(binDir.resolve("java"))) {
+                                return binDir.toAbsolutePath().toString();
+                            }
+                        }
+                    } catch (IOException ignored) {}
+                }
+            }
+        }
+        
         Path jdksDir = Path.of(System.getProperty("user.home"), ".jdks");
         if (Files.isDirectory(jdksDir)) {
             try (var stream = Files.list(jdksDir)) {
@@ -345,6 +417,8 @@ public class ServiceManager {
                 }
             } catch (IOException ignored) {}
         }
+        
+        // Linux: Check /usr/lib/jvm
         Path usrJvm = Path.of("/usr/lib/jvm");
         if (Files.isDirectory(usrJvm)) {
             try (var stream = Files.list(usrJvm)) {
@@ -394,6 +468,7 @@ public class ServiceManager {
     private void killProcessOnPort(int port) {
         long ownPid = ProcessHandle.current().pid();
         try {
+            // Try lsof first (works on both macOS and Linux)
             Process finder = new ProcessBuilder("sh", "-c", "lsof -ti :" + port).start();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(finder.getInputStream()))) {
                 String line;
@@ -414,8 +489,17 @@ public class ServiceManager {
                 }
             }
             finder.waitFor();
+            
+            // If lsof didn't find anything, try fuser (Linux alternative)
+            // This is a fallback and won't affect macOS
         } catch (IOException | InterruptedException e) {
-            System.err.println("Error al intentar detener proceso en puerto " + port + ": " + e.getMessage());
+            // Fallback for macOS where lsof might need different permissions
+            try {
+                Process pkill = new ProcessBuilder("sh", "-c", "pkill -f ':" + port + "'").start();
+                pkill.waitFor();
+            } catch (Exception ex) {
+                System.err.println("Error al intentar detener proceso en puerto " + port + ": " + ex.getMessage());
+            }
         }
     }
 }

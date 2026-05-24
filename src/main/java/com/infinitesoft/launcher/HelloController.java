@@ -127,22 +127,52 @@ public class HelloController {
     @FXML
     protected void onLaunchApp() {
         final String url = "http://localhost:4200/login";
-        try {
-            new ProcessBuilder("google-chrome", "--app=" + url).start();
-        } catch (IOException e1) {
+        String osName = System.getProperty("os.name").toLowerCase();
+        
+        if (osName.contains("mac")) {
             try {
-                new ProcessBuilder("chromium-browser", "--app=" + url).start();
-            } catch (IOException e2) {
+                new ProcessBuilder("open", "-a", "Google Chrome", "--args", "--app=" + url).start();
+            } catch (IOException e1) {
                 try {
-                    new ProcessBuilder("firefox", "--new-window", url).start();
-                } catch (IOException e3) {
-                    if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                    new ProcessBuilder("open", "-a", "Chromium", "--args", "--app=" + url).start();
+                } catch (IOException e2) {
+                    try {
+                        new ProcessBuilder("open", "-a", "Firefox", "--args", "--new-window", url).start();
+                    } catch (IOException e3) {
                         try {
-                            Desktop.getDesktop().browse(new URI(url));
-                        } catch (Exception e4) {
+                            new ProcessBuilder("open", url).start();
+                        } catch (IOException e4) {
                             e4.printStackTrace();
                         }
                     }
+                }
+            }
+        } else if (osName.contains("linux")) {
+            try {
+                new ProcessBuilder("google-chrome", "--app=" + url).start();
+            } catch (IOException e1) {
+                try {
+                    new ProcessBuilder("chromium-browser", "--app=" + url).start();
+                } catch (IOException e2) {
+                    try {
+                        new ProcessBuilder("firefox", "--new-window", url).start();
+                    } catch (IOException e3) {
+                        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                            try {
+                                Desktop.getDesktop().browse(new URI(url));
+                            } catch (Exception e4) {
+                                e4.printStackTrace();
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                try {
+                    Desktop.getDesktop().browse(new URI(url));
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
             }
         }
@@ -194,13 +224,31 @@ public class HelloController {
 
     @FXML
     protected void onOpenDbManager() {
-        try {
-            new ProcessBuilder("dbeaver").start();
-        } catch (IOException e1) {
+        String osName = System.getProperty("os.name").toLowerCase();
+        
+        if (osName.contains("mac")) {
             try {
-                new ProcessBuilder("dbeaver-ce").start();
-            } catch (IOException e2) {
-                e2.printStackTrace();
+                new ProcessBuilder("open", "-a", "DBeaver").start();
+            } catch (IOException e1) {
+                try {
+                    new ProcessBuilder("open", "-a", "DBeaverEE").start();
+                } catch (IOException e2) {
+                    try {
+                        new ProcessBuilder("dbeaver").start();
+                    } catch (IOException e3) {
+                        e3.printStackTrace();
+                    }
+                }
+            }
+        } else {
+            try {
+                new ProcessBuilder("dbeaver").start();
+            } catch (IOException e1) {
+                try {
+                    new ProcessBuilder("dbeaver-ce").start();
+                } catch (IOException e2) {
+                    e2.printStackTrace();
+                }
             }
         }
     }

@@ -21,7 +21,7 @@ Permite iniciar, detener, reiniciar y actualizar (git pull + build) cada servici
 - **Angular** (frontend)
 - **Docker** (PostgreSQL)
 
-## Cambios realizados (adaptación a Linux)
+## Cambios realizados (adaptación a Linux/macOS)
 
 ### 1. `pom.xml` — Dependencias JavaFX multi-plataforma
 
@@ -36,23 +36,28 @@ Permite iniciar, detener, reiniciar y actualizar (git pull + build) cada servici
 
 - **Antes**: `C:/dev/repos`
 - **Ahora**: `$HOME/dev/repos`
-- Se adapta automáticamente al directorio home del usuario en Linux.
+- Se adapta automáticamente al directorio home del usuario en Linux/macOS.
 
 ### 3. `ServiceManager.java` — Comandos de sistema
 
-| Función | Windows (original) | Linux (nuevo) |
+| Función | Windows (original) | Linux/macOS (nuevo) |
 |---|---|---|
 | `LOGS_DIRECTORY` | `C:/dev/repos/.../logs` | `$HOME/.infinitesoft/logs` |
 | `start()` | `cmd.exe /c start /B ...` | `sh -c "... > log 2>&1"` |
 | `killProcessOnPort()` | `netstat -ano \| findstr` + `taskkill` | `lsof -ti :port` + `kill -9` |
 | `updateProject()` | `cmd.exe /c git pull / mvn / npm` | comandos directos `git pull`, `mvn`, `npm` |
-| `ensureFirewallRuleExists()` | PowerShell con UAC | Eliminado (no aplica en Linux) |
+| `ensureFirewallRuleExists()` | PowerShell con UAC | Eliminado (no aplica en Linux/macOS) |
+| `discoverJavaBinDir()` | Windows paths | macOS: `/Library/Java/JavaVirtualMachines`, Linux: `/usr/lib/jvm` |
 
 ### 4. `HelloController.java` — Rutas de aplicaciones externas
 
-- **onLaunchApp()**: Chrome/Edge paths Windows → `google-chrome`, `chromium-browser`, `firefox`
+- **onLaunchApp()**: 
+  - macOS: `open -a "Google Chrome"`, `open -a "Chromium"`, `open -a "Firefox"`, fallback `open <url>`
+  - Linux: `google-chrome`, `chromium-browser`, `firefox`
 - **onOpenLogs()**: `C:/dev/repos/.../logs` → `$HOME/.infinitesoft/logs`
-- **onOpenDbManager()**: `C:\Program Files\DBeaver\dbeaver.exe` → `dbeaver` / `dbeaver-ce`
+- **onOpenDbManager()**: 
+  - macOS: `open -a "DBeaver"`
+  - Linux: `dbeaver` / `dbeaver-ce`
 
 ### 5. `HelloController.java` — Bug DirectoryChooser
 
@@ -61,7 +66,29 @@ Permite iniciar, detener, reiniciar y actualizar (git pull + build) cada servici
 
 ## Cómo ejecutar
 
+### macOS
+
 ```bash
+# Opción 1: Script dedicado
+./run-macos.sh
+
+# Opción 2: Maven
+mvn clean package -DskipTests && java -jar target/infinito-launcher.jar
+
+# Opción 3: Maven plugin
+mvn javafx:run
+```
+
+### Linux
+
+```bash
+# Opción 1: Script dedicado
+./infinito-launcher.sh
+
+# Opción 2: Maven
+mvn clean package -DskipTests && java -jar target/infinito-launcher.jar
+
+# Opción 3: Maven plugin
 mvn javafx:run
 ```
 
