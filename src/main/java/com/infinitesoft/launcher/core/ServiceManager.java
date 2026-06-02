@@ -20,11 +20,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class ServiceManager {
     private final Map<String, ServiceDefinition> definitions = new LinkedHashMap<>();
     private final Map<String, Process> processes = new ConcurrentHashMap<>();
+    private final Map<String, Path> processLogFiles = new ConcurrentHashMap<>();
     private final Map<String, ServiceStatus> statuses = new ConcurrentHashMap<>();
     private final HealthChecker healthChecker = new HealthChecker();
     private final ScheduledExecutorService monitor = Executors.newSingleThreadScheduledExecutor();
@@ -35,7 +38,11 @@ public class ServiceManager {
     public static final String NAME_SMTP = "smtp";
     public static final String NAME_STORE = "store";
     public static final String NAME_FRONT = "front";
+    public static final String MICOTIZACION_PATH = "/apps/personas/micotizacion";
     private static final int FRONTEND_HEALTH_PORT = 3001;
+    private static final int CADDY_PORT = 8080;
+    private static final Pattern TUNNEL_URL_PATTERN =
+            Pattern.compile("https://[a-z0-9-]+\\.trycloudflare\\.com");
     private static final Path LOGS_DIRECTORY = Path.of(System.getProperty("user.home"), ".infinitesoft/logs");
     private static final DateTimeFormatter LOG_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final String JAVA_BIN_DIR = discoverJavaBinDir();
@@ -113,12 +120,12 @@ public class ServiceManager {
                 4
         ));
 
-        // Front (4200)
+        // Front (4200) + Caddy (8080) + Cloudflare Tunnel para micotizacion
         definitions.put(NAME_FRONT, new ServiceDefinition(
                 "Aplicación Frontend",
                 ServiceType.NODE_NPM,
                 Path.of(base, "infinito-ai-front"),
-                "npm run serve:prod",
+                "npm run start:micotizacion",
                 null,
                 "http://127.0.0.1:" + FRONTEND_HEALTH_PORT + "/actuator/health",
                 4200,
@@ -206,17 +213,11 @@ public class ServiceManager {
                         fullCommand + " > " + logFilePath.toAbsolutePath() + " 2>&1")
                         .directory(def.getWorkingDir().toFile());
 
-                if (JAVA_BIN_DIR != null) {
-                    Map<String, String> env = pb.environment();
-                    String currentPath = env.get("PATH");
-                    env.put("PATH", JAVA_BIN_DIR + File.pathSeparator + (currentPath != null ? currentPath : ""));
-                    
-                    // También establecer JAVA_HOME por si el jar o scripts dependientes lo usan
-                    env.put("JAVA_HOME", Path.of(JAVA_BIN_DIR).getParent().toString());
-                }
+                applyShellPath(pb, JAVA_BIN_DIR);
 
                 Process process = pb.start();
                 processes.put(key, process);
+                processLogFiles.put(key, logFilePath);
             } catch (IOException e) {
                 statuses.put(key, ServiceStatus.FAILED);
                 e.printStackTrace();
@@ -236,9 +237,13 @@ public class ServiceManager {
                 System.err.println("Error al detener contenedor Docker: " + e.getMessage());
             }
         } else if (key.equals(NAME_FRONT)) {
-            System.out.println("Deteniendo servicio Frontend en puertos " + def.getTcpPort() + " y " + FRONTEND_HEALTH_PORT);
+            System.out.println("Deteniendo servicio Frontend en puertos " + def.getTcpPort() + ", "
+                    + FRONTEND_HEALTH_PORT + " y " + CADDY_PORT);
             killProcessOnPort(def.getTcpPort());
             killProcessOnPort(FRONTEND_HEALTH_PORT);
+            killProcessOnPort(CADDY_PORT);
+            killProcessByPattern("cloudflared tunnel");
+            killProcessByPattern("caddy run");
         } else if (def.getTcpPort() != null && (def.getType() == ServiceType.NODE_NPM || def.getType() == ServiceType.JAVA_JAR)) {
             System.out.println("Deteniendo servicio " + def.getName() + " en puerto " + def.getTcpPort());
             killProcessOnPort(def.getTcpPort());
@@ -248,7 +253,107 @@ public class ServiceManager {
         if (p != null && p.isAlive()) {
             p.destroyForcibly();
         }
+        processLogFiles.remove(key);
         statuses.put(key, ServiceStatus.NOT_RUNNING);
+    }
+
+    public Optional<String> findTunnelBaseUrl() {
+        Path logPath = processLogFiles.get(NAME_FRONT);
+        if (logPath == null) {
+            logPath = findLatestLogForService(NAME_FRONT);
+        }
+        if (logPath == null || !Files.exists(logPath)) {
+            return Optional.empty();
+        }
+        try {
+            String content = Files.readString(logPath);
+            Matcher matcher = TUNNEL_URL_PATTERN.matcher(content);
+            String lastMatch = null;
+            while (matcher.find()) {
+                lastMatch = matcher.group();
+            }
+            return Optional.ofNullable(lastMatch);
+        } catch (IOException e) {
+            return Optional.empty();
+        }
+    }
+
+    public Optional<String> findMicotizacionTunnelUrl() {
+        return findTunnelBaseUrl().map(base -> base + MICOTIZACION_PATH);
+    }
+
+    public Optional<String> waitForTunnelUrl(Duration timeout) {
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            Optional<String> url = findMicotizacionTunnelUrl();
+            if (url.isPresent()) {
+                return url;
+            }
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        return findMicotizacionTunnelUrl();
+    }
+
+    public void redeployFrontTunnelStack() {
+        startExecutor.execute(() -> {
+            stop(NAME_FRONT);
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            start(NAME_FRONT);
+        });
+    }
+
+    public void ensurePosServicesRunning() {
+        start(NAME_SECURITY);
+        start(NAME_STORE);
+        start(NAME_FRONT);
+    }
+
+    private Path findLatestLogForService(String serviceKey) {
+        try (var stream = Files.list(LOGS_DIRECTORY)) {
+            return stream
+                    .filter(p -> p.getFileName().toString().startsWith(serviceKey + "-"))
+                    .max(Comparator.comparing(p -> p.getFileName().toString()))
+                    .orElse(null);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private void applyShellPath(ProcessBuilder pb, String javaBinDir) {
+        Map<String, String> env = pb.environment();
+        String currentPath = env.get("PATH");
+        String osName = System.getProperty("os.name").toLowerCase();
+        if (osName.contains("mac")) {
+            String macPaths = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin";
+            String combined = (currentPath != null ? currentPath + File.pathSeparator : "") + macPaths;
+            if (javaBinDir != null) {
+                combined = javaBinDir + File.pathSeparator + combined;
+            }
+            env.put("PATH", combined);
+        } else if (javaBinDir != null) {
+            env.put("PATH", javaBinDir + File.pathSeparator + (currentPath != null ? currentPath : ""));
+        }
+        if (javaBinDir != null) {
+            env.put("JAVA_HOME", Path.of(javaBinDir).getParent().toString());
+        }
+    }
+
+    private void killProcessByPattern(String pattern) {
+        try {
+            new ProcessBuilder("sh", "-c", "pkill -f '" + pattern.replace("'", "'\\''") + "'").start();
+        } catch (IOException e) {
+            System.err.println("Error al detener procesos con patrón " + pattern + ": " + e.getMessage());
+        }
     }
 
     public void restart(String key) {

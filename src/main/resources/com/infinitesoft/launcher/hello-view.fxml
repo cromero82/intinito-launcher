@@ -8,9 +8,9 @@
 <?import javafx.scene.layout.VBox?>
 <?import javafx.scene.text.Font?>
 
-<VBox maxHeight="-Infinity" maxWidth="-Infinity" minHeight="-Infinity" minWidth="-Infinity" prefHeight="400.0" prefWidth="600.0" xmlns="http://javafx.com/javafx/11" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.infinitesoft.launcher.HelloController">
+<VBox maxHeight="-Infinity" maxWidth="-Infinity" minHeight="-Infinity" minWidth="-Infinity" prefHeight="440.0" prefWidth="760.0" xmlns="http://javafx.com/javafx/11" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.infinitesoft.launcher.HelloController">
     <children>
-        <HBox alignment="CENTER_LEFT" prefHeight="60.0" prefWidth="200.0" spacing="20.0" style="-fx-background-color: #f0f0f0;">
+        <HBox alignment="CENTER_LEFT" prefHeight="72.0" prefWidth="200.0" spacing="12.0" style="-fx-background-color: #f0f0f0;">
             <children>
                 <Label text="Estado General:">
                     <font>
@@ -24,9 +24,20 @@
                 </Label>
                 <Button fx:id="launchAppButton" mnemonicParsing="false" onAction="#onLaunchApp" text="Ejecutar aplicacion" />
                 <Button mnemonicParsing="false" onAction="#onOpenBrowser" text="Abrir en navegador" />
+                <Button mnemonicParsing="false" onAction="#onOpenMicotizacionTunnel" text="Cotización (túnel)" />
+                <Button mnemonicParsing="false" onAction="#onConfigureLanHost" text="Configurar IP" style="-fx-font-size: 11px;" />
             </children>
             <padding>
                 <Insets left="20.0" />
+            </padding>
+        </HBox>
+        <HBox alignment="CENTER_LEFT" spacing="16.0" style="-fx-background-color: #fafafa;">
+            <children>
+                <Label fx:id="labelLanHost" text="IP LAN: 192.168.1.6" style="-fx-font-size: 11px; -fx-text-fill: #555;" />
+                <Label fx:id="labelTunnelUrl" text="Cotización: túnel pendiente…" style="-fx-font-size: 11px; -fx-text-fill: #555;" wrapText="true" maxWidth="420" />
+            </children>
+            <padding>
+                <Insets bottom="6.0" left="20.0" right="20.0" top="6.0" />
             </padding>
         </HBox>
         <ScrollPane fitToWidth="true" prefHeight="200.0" prefWidth="200.0" VBox.vgrow="ALWAYS">
