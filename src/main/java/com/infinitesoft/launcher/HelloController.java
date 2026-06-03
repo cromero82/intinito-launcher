@@ -17,7 +17,6 @@ import javafx.stage.Stage;
 import java.awt.Desktop;
 import java.io.File;
 import java.io.IOException;
-import java.net.URI;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -124,6 +123,28 @@ public class HelloController {
         labelGeneralStatus.setStyle(statusStyle);
     }
 
+    private void openUrl(String url) {
+        String os = System.getProperty("os.name").toLowerCase();
+        if (os.contains("linux")) {
+            try {
+                new ProcessBuilder("xdg-open", url).start();
+                return;
+            } catch (IOException e) {
+                System.err.println("Error al abrir URL con xdg-open: " + e.getMessage());
+            }
+        }
+
+        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+            Executors.newSingleThreadExecutor().execute(() -> {
+                try {
+                    Desktop.getDesktop().browse(new java.net.URI(url));
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+    }
+
     @FXML
     protected void onLaunchApp() {
         final String url = "http://localhost:4200/login";
@@ -136,13 +157,7 @@ public class HelloController {
                 try {
                     new ProcessBuilder("firefox", "--new-window", url).start();
                 } catch (IOException e3) {
-                    if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-                        try {
-                            Desktop.getDesktop().browse(new URI(url));
-                        } catch (Exception e4) {
-                            e4.printStackTrace();
-                        }
-                    }
+                    openUrl(url);
                 }
             }
         }
@@ -151,13 +166,7 @@ public class HelloController {
     @FXML
     protected void onOpenBrowser() {
         final String url = "http://localhost:4200/login";
-        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-            try {
-                Desktop.getDesktop().browse(new URI(url));
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
+        openUrl(url);
     }
 
     @FXML
