@@ -120,12 +120,17 @@ public class ServiceManager {
                 4
         ));
 
-        // Front (4200) + Caddy (8080) + Cloudflare Tunnel para micotizacion
+        // Front (4200)
+        String frontStartCommand = "npm run serve:prod"; // Default for Linux
+        if (System.getProperty("os.name").toLowerCase().contains("mac")) {
+            frontStartCommand = "npm run start:micotizacion";
+        }
+
         definitions.put(NAME_FRONT, new ServiceDefinition(
                 "Aplicación Frontend",
                 ServiceType.NODE_NPM,
                 Path.of(base, "infinito-ai-front"),
-                "npm run start:micotizacion",
+                frontStartCommand,
                 null,
                 "http://127.0.0.1:" + FRONTEND_HEALTH_PORT + "/actuator/health",
                 4200,
@@ -237,13 +242,20 @@ public class ServiceManager {
                 System.err.println("Error al detener contenedor Docker: " + e.getMessage());
             }
         } else if (key.equals(NAME_FRONT)) {
-            System.out.println("Deteniendo servicio Frontend en puertos " + def.getTcpPort() + ", "
-                    + FRONTEND_HEALTH_PORT + " y " + CADDY_PORT);
-            killProcessOnPort(def.getTcpPort());
-            killProcessOnPort(FRONTEND_HEALTH_PORT);
-            killProcessOnPort(CADDY_PORT);
-            killProcessByPattern("cloudflared tunnel");
-            killProcessByPattern("caddy run");
+            boolean isMac = System.getProperty("os.name").toLowerCase().contains("mac");
+            if (isMac) {
+                System.out.println("Deteniendo servicio Frontend en puertos " + def.getTcpPort() + ", "
+                        + FRONTEND_HEALTH_PORT + " y " + CADDY_PORT);
+                killProcessOnPort(def.getTcpPort());
+                killProcessOnPort(FRONTEND_HEALTH_PORT);
+                killProcessOnPort(CADDY_PORT);
+                killProcessByPattern("cloudflared tunnel");
+                killProcessByPattern("caddy run");
+            } else {
+                System.out.println("Deteniendo servicio Frontend en puertos " + def.getTcpPort() + " y " + FRONTEND_HEALTH_PORT);
+                killProcessOnPort(def.getTcpPort());
+                killProcessOnPort(FRONTEND_HEALTH_PORT);
+            }
         } else if (def.getTcpPort() != null && (def.getType() == ServiceType.NODE_NPM || def.getType() == ServiceType.JAVA_JAR)) {
             System.out.println("Deteniendo servicio " + def.getName() + " en puerto " + def.getTcpPort());
             killProcessOnPort(def.getTcpPort());

@@ -202,15 +202,16 @@ public class HelloController {
 
     @FXML
     protected void onOpenBrowser() {
-        serviceManager.ensurePosServicesRunning();
-        openInBrowser(HostConfig.getInstance().getTicketsUrl());
+        Executors.newSingleThreadExecutor().execute(() -> {
+            serviceManager.ensurePosServicesRunning();
+            Platform.runLater(() -> openInBrowser(HostConfig.getInstance().getTicketsUrl()));
+        });
     }
 
     @FXML
     protected void onOpenMicotizacionTunnel() {
-        serviceManager.ensurePosServicesRunning();
-
         Executors.newSingleThreadExecutor().execute(() -> {
+            serviceManager.ensurePosServicesRunning();
             Optional<String> tunnelUrl = serviceManager.waitForTunnelUrl(Duration.ofSeconds(120));
             Platform.runLater(() -> {
                 if (tunnelUrl.isPresent()) {
@@ -314,6 +315,23 @@ public class HelloController {
     }
 
     private void openInBrowser(String url) {
+        String osName = System.getProperty("os.name").toLowerCase();
+        if (osName.contains("linux")) {
+            try {
+                new ProcessBuilder("xdg-open", url).start();
+                return;
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        } else if (osName.contains("mac")) {
+            try {
+                new ProcessBuilder("open", url).start();
+                return;
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
         if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
             try {
                 Desktop.getDesktop().browse(new URI(url));
