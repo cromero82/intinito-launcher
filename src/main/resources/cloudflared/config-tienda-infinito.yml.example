@@ -1,0 +1,15 @@
+# Cloudflare Tunnel — máquina standalone "Tienda Infinito" (pila v02)
+#
+# Caddy de esta pila escucha en :8280 (no el :8080 de la caja vieja).
+#   https://tienda-infinito.mayaksoluciones.com → http://127.0.0.1:8280
+#
+# Preferido: ~/.cloudflared/tienda-infinito.token  →  cloudflared tunnel run --token …
+# UUID: cf623430-1915-4236-82cf-7256421a9102
+
+tunnel: cf623430-1915-4236-82cf-7256421a9102
+credentials-file: REPLACE_WITH_CREDENTIALS_JSON
+
+ingress:
+  - hostname: tienda-infinito.mayaksoluciones.com
+    service: http://127.0.0.1:8280
+  - service: http_status:404

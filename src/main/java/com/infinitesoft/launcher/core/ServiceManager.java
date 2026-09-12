@@ -32,15 +32,18 @@ public class ServiceManager {
     private final HealthChecker healthChecker = new HealthChecker();
     private final ScheduledExecutorService monitor = Executors.newSingleThreadScheduledExecutor();
     private final ExecutorService startExecutor = Executors.newCachedThreadPool();
+    private LaunchEnvironment environment;
 
     public static final String NAME_DB = "db";
     public static final String NAME_SECURITY = "security";
     public static final String NAME_SMTP = "smtp";
     public static final String NAME_STORE = "store";
+    public static final String NAME_PUENTE = "puente";
+    public static final String NAME_CADDY = "caddy";
+    public static final String NAME_TUNNEL = "tunnel";
     public static final String NAME_FRONT = "front";
     public static final String MICOTIZACION_PATH = "/apps/personas/micotizacion";
-    private static final int FRONTEND_HEALTH_PORT = 3001;
-    private static final int CADDY_PORT = 8080;
+    private static final long OWN_PID = ProcessHandle.current().pid();
     private static final Pattern TUNNEL_URL_PATTERN =
             Pattern.compile("https://[a-z0-9-]+\\.trycloudflare\\.com");
     private static final Path LOGS_DIRECTORY = Path.of(System.getProperty("user.home"), ".infinitesoft/logs");
@@ -51,14 +54,42 @@ public class ServiceManager {
 
     public ServiceManager() {
         ensureLogsDirectoryExists();
+        this.environment = AppConfig.getInstance().getEnvironment();
+        rebuildDefinitions();
+        monitor.scheduleAtFixedRate(this::refreshStatuses, 0, 2, TimeUnit.SECONDS);
+        startExecutor.execute(this::ensureTunnelAutostart);
+    }
 
-        String base = AppConfig.getInstance().getBasePath();
+    public LaunchEnvironment getEnvironment() {
+        return environment;
+    }
 
-        // DB via Docker container id
+    /**
+     * Cambia ambiente (puertos, carpeta sandbox, hostname). Detiene lo que este launcher haya arrancado.
+     */
+    public synchronized void applyEnvironment(LaunchEnvironment env) {
+        if (env == null) {
+            env = LaunchEnvironment.DEV_LOCAL;
+        }
+        stopAll();
+        this.environment = env;
+        AppConfig.getInstance().setEnvironment(env);
+        rebuildDefinitions();
+        startExecutor.execute(this::ensureTunnelAutostart);
+    }
+
+    private void rebuildDefinitions() {
+        definitions.clear();
+        statuses.clear();
+        Path base = Path.of(AppConfig.getInstance().getBasePath());
+        Path root = environment.reposRoot(base);
+        String profileArg = environment.springProfileArg();
+        String profileSuffix = profileArg.isBlank() ? "" : " " + profileArg;
+
         definitions.put(NAME_DB, new ServiceDefinition(
                 "Base de Datos (Postgres - Docker)",
                 ServiceType.DOCKER,
-                Path.of(base),
+                root,
                 "docker start postgres-pos",
                 "docker stop postgres-pos",
                 null,
@@ -66,34 +97,32 @@ public class ServiceManager {
                 1
         ));
 
-        // Security (8081)
         definitions.put(NAME_SECURITY, new ServiceDefinition(
                 "Servicio de Seguridad",
                 ServiceType.JAVA_JAR,
-                Path.of(base, "infinito-security"),
+                root.resolve("infinito-security"),
                 String.join(" ",
                         "java -jar",
                         "target/infinito-security-0.0.1-SNAPSHOT.jar",
-                        "--server.port=8081",
-                        "\"--spring.datasource.url=jdbc:postgresql://localhost:5432/controlneg_rmx_db?currentSchema=security\"",
+                        "--server.port=" + environment.getAuthPort(),
+                        "\"--spring.datasource.url=" + environment.jdbcUrlAuth() + "\"",
                         "--spring.datasource.username=romax-admin",
                         "\"--spring.datasource.password=f4ast3rv3rs10n*\""
-                ),
+                ) + profileSuffix,
                 null,
-                "http://localhost:8081/actuator/health",
-                8081,
+                "http://localhost:" + environment.getAuthPort() + "/actuator/health",
+                environment.getAuthPort(),
                 2
         ));
 
-        // SMTP (8082)
         definitions.put(NAME_SMTP, new ServiceDefinition(
                 "Servicio de Correos (SMTP)",
                 ServiceType.JAVA_JAR,
-                Path.of(base, "infinito-smtp-service"),
+                root.resolve("infinito-smtp-service"),
                 String.join(" ",
                         "java -jar",
                         "target/smtp-service-0.0.1-SNAPSHOT.jar",
-                        "--server.port=8082",
+                        "--server.port=" + environment.getSmtpPort(),
                         "--spring.mail.host=smtp.gmail.com",
                         "--spring.mail.port=587",
                         "--spring.mail.username=romeromailercarlos@gmail.com",
@@ -103,40 +132,112 @@ public class ServiceManager {
                         "--app.mail.from=romeromailercarlos@gmail.com"
                 ),
                 null,
-                "http://localhost:8082/actuator/health",
-                8082,
+                "http://localhost:" + environment.getSmtpPort() + "/actuator/health",
+                environment.getSmtpPort(),
                 3
         ));
 
-        // Store (8088)
         definitions.put(NAME_STORE, new ServiceDefinition(
                 "Servicio Lógica Tienda",
                 ServiceType.JAVA_JAR,
-                Path.of(base, "pos-relational-data-service"),
-                "java -jar target/pos-relational-data-service-0.0.1-SNAPSHOT.jar --server.port=8088",
+                root.resolve("pos-relational-data-service"),
+                String.join(" ",
+                        "java -jar target/pos-relational-data-service-0.0.1-SNAPSHOT.jar",
+                        "--server.port=" + environment.getStorePort(),
+                        "\"--spring.datasource.url=" + environment.jdbcUrl(null) + "\""
+                ) + profileSuffix,
                 null,
-                "http://localhost:8088/actuator/health",
-                8088,
+                "http://localhost:" + environment.getStorePort() + "/actuator/health",
+                environment.getStorePort(),
                 4
         ));
 
-        // Front (4200) + Caddy (8080) + Cloudflare Tunnel para micotizacion
-        definitions.put(NAME_FRONT, new ServiceDefinition(
-                "Aplicación Frontend",
-                ServiceType.NODE_NPM,
-                Path.of(base, "infinito-ai-front"),
-                "npm run start:micotizacion",
+        definitions.put(NAME_PUENTE, new ServiceDefinition(
+                "Puente (notificaciones / correo banco)",
+                ServiceType.JAVA_JAR,
+                root.resolve("puente-tienda"),
+                String.join(" ",
+                        "java -jar target/puente-tienda-0.0.1-SNAPSHOT.jar",
+                        "--server.port=" + environment.getPuentePort(),
+                        "\"--spring.datasource.url=" + environment.jdbcUrl(null) + "\""
+                ) + profileSuffix,
                 null,
-                "http://127.0.0.1:" + FRONTEND_HEALTH_PORT + "/actuator/health",
-                4200,
+                "http://localhost:" + environment.getPuentePort() + "/actuator/health",
+                environment.getPuentePort(),
                 5
         ));
 
-        // init statuses
-        definitions.keySet().forEach(k -> statuses.put(k, ServiceStatus.NOT_RUNNING));
+        String frontCmd;
+        if (environment == LaunchEnvironment.SANDBOX) {
+            frontCmd = "npx concurrently -k \"npm run health:server\" \"npm run start:angular:sandbox\"";
+        } else if (environment == LaunchEnvironment.TIENDA_INFINITO) {
+            frontCmd = "npx concurrently -k \"npm run health:server\" \"npm run start:angular:tienda-infinito\"";
+        } else {
+            frontCmd = "npm run start";
+        }
+        definitions.put(NAME_FRONT, new ServiceDefinition(
+                "Aplicación Frontend",
+                ServiceType.NODE_NPM,
+                root.resolve("infinito-ai-front"),
+                frontCmd,
+                null,
+                "http://127.0.0.1:" + environment.getHealthPort() + "/actuator/health",
+                environment.getFrontPort(),
+                6
+        ));
 
-        // start monitor loop
-        monitor.scheduleAtFixedRate(this::refreshStatuses, 0, 2, TimeUnit.SECONDS);
+        definitions.put(NAME_CADDY, new ServiceDefinition(
+                "Caddy (portero local del túnel)",
+                ServiceType.PROCESS,
+                root.resolve("infinito-ai-front"),
+                "caddy run --config " + environment.getCaddyfileName(),
+                null,
+                null,
+                environment.getCaddyPort(),
+                7
+        ));
+
+        definitions.put(NAME_TUNNEL, new ServiceDefinition(
+                "Túnel Cloudflare (" + environment.getPublicHostname() + ")",
+                ServiceType.PROCESS,
+                root,
+                tunnelStartCommand(),
+                null,
+                environment.getTunnelReadyUrl(),
+                environment.getTunnelMetricsPort(),
+                8
+        ));
+
+        definitions.keySet().forEach(k -> statuses.put(k, ServiceStatus.NOT_RUNNING));
+    }
+
+    /**
+     * Tienda Infinito: preferir token remoto ({@code ~/.cloudflared/tienda-infinito.token}).
+     * Dev/sandbox: {@code ~/.cloudflared/config.yml} del túnel pos-local.
+     */
+    private String tunnelStartCommand() {
+        Path cfHome = Path.of(System.getProperty("user.home"), ".cloudflared");
+        if (environment == LaunchEnvironment.TIENDA_INFINITO) {
+            Path token = cfHome.resolve("tienda-infinito.token");
+            if (Files.isRegularFile(token)) {
+                String path = token.toAbsolutePath().toString();
+                if (OsSupport.isWindows()) {
+                    return "powershell.exe -NoProfile -Command \"cloudflared tunnel --metrics 127.0.0.1:"
+                            + environment.getTunnelMetricsPort()
+                            + " run --token ((Get-Content -Raw '"
+                            + path.replace("'", "''") + "').Trim())\"";
+                }
+                return "cloudflared tunnel --metrics 127.0.0.1:" + environment.getTunnelMetricsPort()
+                        + " run --token \"$(tr -d '[:space:]' < '"
+                        + path.replace("'", "'\\''") + "')\"";
+            }
+            Path yml = cfHome.resolve("config-tienda-infinito.yml");
+            return "cloudflared tunnel --metrics 127.0.0.1:" + environment.getTunnelMetricsPort()
+                    + " --config \"" + yml + "\" run " + environment.getTunnelName();
+        }
+        Path yml = cfHome.resolve("config.yml");
+        return "cloudflared tunnel --metrics 127.0.0.1:" + environment.getTunnelMetricsPort()
+                + " --config \"" + yml + "\" run " + environment.getTunnelName();
     }
 
     private void ensureLogsDirectoryExists() {
@@ -171,7 +272,7 @@ public class ServiceManager {
     public void startAllSequential(Duration perStepTimeout) {
         Executors.newSingleThreadExecutor().execute(() -> {
             for (String key : getServiceKeysInOrder()) {
-                if (key.equals(NAME_DB)) continue;
+                if (skipStart(key)) continue;
                 start(key);
                 long deadline = System.currentTimeMillis() + perStepTimeout.toMillis();
                 while (System.currentTimeMillis() < deadline) {
@@ -184,15 +285,17 @@ public class ServiceManager {
 
     public void start(String key) {
         startExecutor.execute(() -> {
+            if (skipStart(key) && !NAME_DB.equals(key)) {
+                statuses.put(key, ServiceStatus.NOT_RUNNING);
+                return;
+            }
             ServiceDefinition def = definitions.get(key);
             if (def == null || def.getStartCommand() == null) return;
-            boolean alreadyHealthy = false;
-            if (def.getHealthUrl() != null) {
-                alreadyHealthy = healthChecker.isHttpHealthy(def.getHealthUrl());
-            } else if (def.getTcpPort() != null) {
-                alreadyHealthy = healthChecker.isTcpOpen("localhost", def.getTcpPort(), 1000);
+            if (key.equals(NAME_TUNNEL)) {
+                ensureTunnelAutostart();
+                return;
             }
-            if (alreadyHealthy) {
+            if (isDefinitionReachable(key, def)) {
                 statuses.put(key, ServiceStatus.RUNNING);
                 return;
             }
@@ -209,13 +312,21 @@ public class ServiceManager {
                 String javaCmd = (JAVA_BIN_DIR != null) ? JAVA_BIN_DIR + File.separator + "java" : "java";
                 String fullCommand = def.getStartCommand().replaceFirst("^java\\s", javaCmd + " ");
 
-                ProcessBuilder pb = new ProcessBuilder("sh", "-c",
-                        fullCommand + " > " + logFilePath.toAbsolutePath() + " 2>&1")
-                        .directory(def.getWorkingDir().toFile());
+                Map<String, String> extraEnv = new java.util.HashMap<>();
+                extraEnv.put("PATH", mergedPath(JAVA_BIN_DIR));
+                if (JAVA_BIN_DIR != null) {
+                    extraEnv.put("JAVA_HOME", Path.of(JAVA_BIN_DIR).getParent().toString());
+                }
+                if (key.equals(NAME_FRONT)) {
+                    extraEnv.put("PORT", String.valueOf(environment.getHealthPort()));
+                }
 
-                applyShellPath(pb, JAVA_BIN_DIR);
-
-                Process process = pb.start();
+                Process process = OsSupport.startLogged(
+                        fullCommand,
+                        def.getWorkingDir().toFile(),
+                        logFilePath,
+                        extraEnv
+                );
                 processes.put(key, process);
                 processLogFiles.put(key, logFilePath);
             } catch (IOException e) {
@@ -232,21 +343,30 @@ public class ServiceManager {
         if (def.getType() == ServiceType.DOCKER && def.getStopCommand() != null) {
             System.out.println("Deteniendo contenedor Docker: " + def.getStopCommand());
             try {
-                new ProcessBuilder("sh", "-c", def.getStopCommand()).start();
+                OsSupport.startLogged(def.getStopCommand(), def.getWorkingDir().toFile(), null, null);
             } catch (IOException e) {
                 System.err.println("Error al detener contenedor Docker: " + e.getMessage());
             }
         } else if (key.equals(NAME_FRONT)) {
-            System.out.println("Deteniendo servicio Frontend en puertos " + def.getTcpPort() + ", "
-                    + FRONTEND_HEALTH_PORT + " y " + CADDY_PORT);
-            killProcessOnPort(def.getTcpPort());
-            killProcessOnPort(FRONTEND_HEALTH_PORT);
-            killProcessOnPort(CADDY_PORT);
-            killProcessByPattern("cloudflared tunnel");
-            killProcessByPattern("caddy run");
-        } else if (def.getTcpPort() != null && (def.getType() == ServiceType.NODE_NPM || def.getType() == ServiceType.JAVA_JAR)) {
+            System.out.println("Deteniendo Frontend en puertos " + def.getTcpPort() + " y "
+                    + environment.getHealthPort());
+            if (def.getTcpPort() != null) {
+                OsSupport.killProcessOnPort(def.getTcpPort(), OWN_PID);
+            }
+            OsSupport.killProcessOnPort(environment.getHealthPort(), OWN_PID);
+        } else if (key.equals(NAME_CADDY)) {
+            if (def.getTcpPort() != null) {
+                OsSupport.killProcessOnPort(def.getTcpPort(), OWN_PID);
+            }
+            OsSupport.killProcessByPattern("caddy run");
+        } else if (key.equals(NAME_TUNNEL)) {
+            System.out.println("El túnel Cloudflare es de inicio de sesión; no se detiene con el POS.");
+            return;
+        } else if (def.getTcpPort() != null && (def.getType() == ServiceType.NODE_NPM
+                || def.getType() == ServiceType.JAVA_JAR
+                || def.getType() == ServiceType.PROCESS)) {
             System.out.println("Deteniendo servicio " + def.getName() + " en puerto " + def.getTcpPort());
-            killProcessOnPort(def.getTcpPort());
+            OsSupport.killProcessOnPort(def.getTcpPort(), OWN_PID);
         }
 
         Process p = processes.remove(key);
@@ -279,6 +399,10 @@ public class ServiceManager {
     }
 
     public Optional<String> findMicotizacionTunnelUrl() {
+        if (CloudflaredAutostart.isReady(environment)
+                || OsSupport.isProcessMatching("cloudflared")) {
+            return Optional.of(environment.getPublicUrl() + MICOTIZACION_PATH);
+        }
         return findTunnelBaseUrl().map(base -> base + MICOTIZACION_PATH);
     }
 
@@ -318,6 +442,10 @@ public class ServiceManager {
         start(NAME_FRONT);
     }
 
+    public String publicAppUrl() {
+        return environment.getPublicUrl();
+    }
+
     private Path findLatestLogForService(String serviceKey) {
         try (var stream = Files.list(LOGS_DIRECTORY)) {
             return stream
@@ -329,35 +457,50 @@ public class ServiceManager {
         }
     }
 
+    private String mergedPath(String javaBinDir) {
+        String currentPath = System.getenv("PATH");
+        String extra;
+        if (OsSupport.isMac()) {
+            extra = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin";
+        } else if (OsSupport.isWindows()) {
+            extra = "C:\\Windows\\System32;C:\\Windows";
+        } else {
+            extra = "/usr/local/bin:/usr/bin:/bin";
+        }
+        String combined = (currentPath != null ? currentPath + File.pathSeparator : "") + extra;
+        if (javaBinDir != null) {
+            combined = javaBinDir + File.pathSeparator + combined;
+        }
+        return combined;
+    }
+
     private void applyShellPath(ProcessBuilder pb, String javaBinDir) {
         Map<String, String> env = pb.environment();
-        String currentPath = env.get("PATH");
-        String osName = System.getProperty("os.name").toLowerCase();
-        if (osName.contains("mac")) {
-            String macPaths = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin";
-            String combined = (currentPath != null ? currentPath + File.pathSeparator : "") + macPaths;
-            if (javaBinDir != null) {
-                combined = javaBinDir + File.pathSeparator + combined;
-            }
-            env.put("PATH", combined);
-        } else if (javaBinDir != null) {
-            env.put("PATH", javaBinDir + File.pathSeparator + (currentPath != null ? currentPath : ""));
-        }
+        env.put("PATH", mergedPath(javaBinDir));
         if (javaBinDir != null) {
             env.put("JAVA_HOME", Path.of(javaBinDir).getParent().toString());
         }
     }
 
-    private void killProcessByPattern(String pattern) {
-        try {
-            new ProcessBuilder("sh", "-c", "pkill -f '" + pattern.replace("'", "'\\''") + "'").start();
-        } catch (IOException e) {
-            System.err.println("Error al detener procesos con patrón " + pattern + ": " + e.getMessage());
-        }
-    }
-
     public void restart(String key) {
         startExecutor.execute(() -> {
+            if (key.equals(NAME_TUNNEL)) {
+                statuses.put(NAME_TUNNEL, ServiceStatus.STARTING);
+                try {
+                    CloudflaredAutostart.restart(environment, msg -> System.out.println("[tunnel] " + msg));
+                    statuses.put(
+                            NAME_TUNNEL,
+                            CloudflaredAutostart.isReady(environment)
+                                    || OsSupport.isProcessMatching("cloudflared")
+                                    ? ServiceStatus.RUNNING
+                                    : ServiceStatus.STARTING
+                    );
+                } catch (IOException e) {
+                    statuses.put(NAME_TUNNEL, ServiceStatus.FAILED);
+                    System.err.println("No se pudo reiniciar el túnel: " + e.getMessage());
+                }
+                return;
+            }
             stop(key);
             try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
             start(key);
@@ -365,11 +508,59 @@ public class ServiceManager {
     }
 
     public void startAll() {
-        getServiceKeysInOrder().stream().filter(key -> !key.equals(NAME_DB)).forEach(this::start);
+        getServiceKeysInOrder().stream().filter(key -> !skipStart(key)).forEach(this::start);
     }
 
     public void stopAll() {
-        new ArrayList<>(definitions.keySet()).stream().filter(key -> !key.equals(NAME_DB)).forEach(this::stop);
+        new ArrayList<>(definitions.keySet()).stream().filter(key -> !skipStop(key)).forEach(this::stop);
+    }
+
+    /** Postgres lo arranca Docker a mano. Caja actual no levanta correo/túnel. */
+    private boolean skipStart(String key) {
+        if (NAME_DB.equals(key)) {
+            return true;
+        }
+        if (NAME_SMTP.equals(key) && !environment.startsSmtp()) {
+            return true;
+        }
+        if (NAME_PUENTE.equals(key) && !environment.startsPuente()) {
+            return true;
+        }
+        if (NAME_CADDY.equals(key) && !environment.startsCaddy()) {
+            return true;
+        }
+        if (NAME_TUNNEL.equals(key) && !environment.startsTunnel()) {
+            return true;
+        }
+        return false;
+    }
+
+    /** El túnel sobrevive a Detener todo: es servicio de login, no hijo del POS. */
+    private boolean skipStop(String key) {
+        return NAME_DB.equals(key) || NAME_TUNNEL.equals(key);
+    }
+
+    private void ensureTunnelAutostart() {
+        if (!environment.startsTunnel()) {
+            statuses.put(NAME_TUNNEL, ServiceStatus.NOT_RUNNING);
+            return;
+        }
+        statuses.put(NAME_TUNNEL, ServiceStatus.STARTING);
+        try {
+            CloudflaredAutostart.ensureInstalledAndRunning(
+                    environment,
+                    msg -> System.out.println("[tunnel] " + msg)
+            );
+            statuses.put(
+                    NAME_TUNNEL,
+                    CloudflaredAutostart.isReady(environment) || OsSupport.isProcessMatching("cloudflared")
+                            ? ServiceStatus.RUNNING
+                            : ServiceStatus.STARTING
+            );
+        } catch (Exception e) {
+            statuses.put(NAME_TUNNEL, ServiceStatus.FAILED);
+            System.err.println("No se pudo dejar el túnel Cloudflare en autostart: " + e.getMessage());
+        }
     }
 
     public void updateProject(String key, java.util.function.Consumer<String> logCallback) {
@@ -398,32 +589,14 @@ public class ServiceManager {
 
     private void runAndLogShell(String command, java.io.File workingDir, java.util.function.Consumer<String> logCallback, String javaBinDir)
             throws IOException, InterruptedException {
-        ProcessBuilder pb = new ProcessBuilder("sh", "-c", command)
-                .directory(workingDir)
-                .redirectErrorStream(true);
-
-        Map<String, String> env = pb.environment();
-        String currentPath = env.get("PATH");
-
-        // macOS: apps GUI no heredan PATH del shell, agregar rutas estándar
-        String osName = System.getProperty("os.name").toLowerCase();
-        if (osName.contains("mac")) {
-            String macPaths = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin";
-            String combined = (currentPath != null ? currentPath + File.pathSeparator : "") + macPaths;
-            if (javaBinDir != null) {
-                combined = javaBinDir + File.pathSeparator + combined;
-            }
-            env.put("PATH", combined);
-        } else if (javaBinDir != null) {
-            env.put("PATH", javaBinDir + File.pathSeparator + (currentPath != null ? currentPath : ""));
+        ProcessBuilder pb;
+        if (OsSupport.isWindows()) {
+            pb = new ProcessBuilder("cmd.exe", "/c", command);
+        } else {
+            pb = new ProcessBuilder("sh", "-c", command);
         }
-
-        if (javaBinDir != null) {
-            String javaHome = System.getenv("JAVA_HOME");
-            if (javaHome == null && JAVA_BIN_DIR != null) {
-                env.put("JAVA_HOME", Path.of(JAVA_BIN_DIR).getParent().toString());
-            }
-        }
+        pb.directory(workingDir).redirectErrorStream(true);
+        applyShellPath(pb, javaBinDir);
 
         Process process = pb.start();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
@@ -461,8 +634,10 @@ public class ServiceManager {
     private static String discoverMvnCommand() {
         String mavenHome = System.getenv("MAVEN_HOME");
         if (mavenHome != null) {
-            Path mvn = Path.of(mavenHome, "bin", "mvn");
-            if (Files.exists(mvn)) return mvn.toAbsolutePath().toString();
+            Path mvnUnix = Path.of(mavenHome, "bin", "mvn");
+            Path mvnWin = Path.of(mavenHome, "bin", "mvn.cmd");
+            if (Files.exists(mvnWin)) return mvnWin.toAbsolutePath().toString();
+            if (Files.exists(mvnUnix)) return mvnUnix.toAbsolutePath().toString();
         }
         Path m2Dir = Path.of(System.getProperty("user.home"), ".m2", "wrapper", "dists");
         if (Files.isDirectory(m2Dir)) {
@@ -486,6 +661,26 @@ public class ServiceManager {
         }
         
         String osName = System.getProperty("os.name").toLowerCase();
+        if (osName.contains("win")) {
+            List<Path> winJvm = List.of(
+                    Path.of("C:\\Program Files\\Java"),
+                    Path.of("C:\\Program Files\\Microsoft"),
+                    Path.of(System.getProperty("user.home"), ".jdks")
+            );
+            for (Path root : winJvm) {
+                if (!Files.isDirectory(root)) {
+                    continue;
+                }
+                try (var stream = Files.walk(root, 4)) {
+                    Optional<Path> javaExe = stream
+                            .filter(p -> p.getFileName().toString().equalsIgnoreCase("java.exe"))
+                            .findFirst();
+                    if (javaExe.isPresent()) {
+                        return javaExe.get().getParent().toAbsolutePath().toString();
+                    }
+                } catch (IOException ignored) {}
+            }
+        }
         // macOS: Check user library first, then system library
         if (osName.contains("mac")) {
             List<Path> macJVMPaths = List.of(
@@ -555,56 +750,38 @@ public class ServiceManager {
     private ServiceStatus computeStatus(String key, ServiceDefinition def) {
         boolean alive = Optional.ofNullable(processes.get(key)).map(Process::isAlive).orElse(false);
 
-        boolean healthy = false;
-        if (def.getHealthUrl() != null) {
-            healthy = healthChecker.isHttpHealthy(def.getHealthUrl());
-        } else if (def.getTcpPort() != null) {
-            healthy = healthChecker.isTcpOpen("localhost", def.getTcpPort(), 1000);
+        if (isDefinitionReachable(key, def)) return ServiceStatus.RUNNING;
+        if (key.equals(NAME_TUNNEL) && (alive || OsSupport.isProcessMatching("cloudflared"))) {
+            return ServiceStatus.RUNNING;
         }
-
-        if (healthy) return ServiceStatus.RUNNING;
-        if (alive) return ServiceStatus.STARTING;
+        if (alive) {
+            return def.getHealthUrl() != null ? ServiceStatus.STARTING : ServiceStatus.RUNNING;
+        }
         if (def.getType() == ServiceType.DOCKER && def.getTcpPort() != null) {
             if (healthChecker.isTcpOpen("localhost", def.getTcpPort(), 1000)) return ServiceStatus.RUNNING;
         }
         return ServiceStatus.NOT_RUNNING;
     }
 
-    private void killProcessOnPort(int port) {
-        long ownPid = ProcessHandle.current().pid();
-        try {
-            // Try lsof first (works on both macOS and Linux)
-            Process finder = new ProcessBuilder("sh", "-c", "lsof -ti :" + port).start();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(finder.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    line = line.trim();
-                    if (line.isEmpty()) continue;
-                    try {
-                        long targetPid = Long.parseLong(line);
-                        if (targetPid == ownPid) {
-                            System.err.println("ADVERTENCIA: Se ha evitado la auto-terminación del launcher (PID: " + targetPid + ") en el puerto " + port);
-                            continue;
-                        }
-                        System.out.println("Deteniendo proceso con PID: " + targetPid + " en el puerto " + port);
-                        new ProcessBuilder("kill", "-9", String.valueOf(targetPid)).start();
-                    } catch (NumberFormatException | IOException e) {
-                        // Ignorar
-                    }
-                }
-            }
-            finder.waitFor();
-            
-            // If lsof didn't find anything, try fuser (Linux alternative)
-            // This is a fallback and won't affect macOS
-        } catch (IOException | InterruptedException e) {
-            // Fallback for macOS where lsof might need different permissions
-            try {
-                Process pkill = new ProcessBuilder("sh", "-c", "pkill -f ':" + port + "'").start();
-                pkill.waitFor();
-            } catch (Exception ex) {
-                System.err.println("Error al intentar detener proceso en puerto " + port + ": " + ex.getMessage());
-            }
+    /**
+     * Front: Angular en su puerto cuenta como arriba aunque el health :3001
+     * siga en 503 (pasa si se cambia la fecha del sistema).
+     */
+    private boolean isDefinitionReachable(String key, ServiceDefinition def) {
+        if (key.equals(NAME_FRONT) && def.getTcpPort() != null
+                && healthChecker.isTcpOpen("localhost", def.getTcpPort(), 1000)) {
+            return true;
         }
+        if (def.getHealthUrl() != null) {
+            return healthChecker.isHttpHealthy(def.getHealthUrl());
+        }
+        if (def.getTcpPort() != null) {
+            return healthChecker.isTcpOpen("localhost", def.getTcpPort(), 1000);
+        }
+        return false;
+    }
+
+    private void killProcessOnPort(int port) {
+        OsSupport.killProcessOnPort(port, OWN_PID);
     }
 }

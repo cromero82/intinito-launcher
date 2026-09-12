@@ -1,95 +1,61 @@
 # Onboarding - Infinito Launcher
 
-## ¿Qué hace esta aplicación?
+**Infinito Launcher** (`intinito-launcher`, el nombre del repo lleva un typo histórico) es un panel JavaFX para **arrancar y parar** los procesos del POS en **esta máquina**. No sustituye a IntelliJ: es el control de lo que ya está compilado (JAR / npm).
 
-**Infinito Launcher** es un lanzador gráfico (JavaFX) que gestiona servicios locales de desarrollo para el proyecto **Infinito**:
+Sirve en **Windows, macOS y Linux**. Elige el ambiente arriba y luego inicia servicios uno a uno, o **Iniciar todo**.
 
-- **Base de Datos** (PostgreSQL via Docker, puerto 5432)
-- **Servicio de Seguridad** (Spring Boot JAR, puerto 8081)
-- **Servicio de Correos SMTP** (Spring Boot JAR, puerto 8082)
-- **Lógica Tienda** (Spring Boot JAR, puerto 8088)
-- **Frontend** (Angular via npm, puerto 4200)
+## Ambientes
 
-Permite iniciar, detener, reiniciar y actualizar (git pull + build) cada servicio desde una interfaz gráfica, además de monitorear su estado vía health checks HTTP/TCP.
+| Ambiente | Para qué | Front | POS | Puente | Caddy | Hostname público |
+|---|---|---|---|---|---|---|
+| **Dev local** | Laptop de desarrollo | 4200 | 8088 | 8095 | 8080 | `cotiza.mayaksoluciones.com` |
+| **Sandbox** | Copia del tester (`repos/sandbox/…`) | 4210 | 8188 | 8195 | 8180 | `pos-sandbox.mayaksoluciones.com` |
+| **Caja actual** | Copia productiva vieja (`controlneg_rmx_db`) | 4200 | 8088 | — | — | — (sin notificaciones) |
+| **Tienda Infinito** | Pila v02 (`controlneg_rmx_db_v02`) + correo CF | 4220 | 8288 | 8295 | 8280 | `tienda-infinito.mayaksoluciones.com` |
 
-## Stack técnico
+En **Tienda Infinito**, **Ejecutar scripts** (una vez): dump → `controlneg_rmx_db_v02` + manifiesto (`64_` Caja Menor, `65_` ventas, `66_` `tienda-infinito@`). Luego el botón se bloquea.
 
-- **Java 11** con módulos (JPMS)
-- **JavaFX 11** para interfaz gráfica
-- **Maven** para build y dependencias
-- **Spring Boot** (servicios backend)
-- **Angular** (frontend)
-- **Docker** (PostgreSQL)
+La ruta de proyectos (pie de ventana) es la carpeta `repos`. En Sandbox el launcher entra solo a `repos/sandbox`. En Dev y Tienda Infinito usa los proyectos de esa carpeta.
 
-## Cambios realizados (adaptación a Linux/macOS)
+## Servicios (uno a uno o todos)
 
-### 1. `pom.xml` — Dependencias JavaFX multi-plataforma
+Ya estaban: Base de datos, Seguridad, SMTP, Lógica tienda, Frontend.
 
-- **Problema**: Las dependencias JavaFX tenían `<classifier>win</classifier>` hardcodeado, solo funcionaban en Windows.
-- **Solución**: Se reemplazó por `<classifier>${javafx.classifier}</classifier>` con perfiles Maven que detectan automáticamente el SO:
-  - Perfil `linux` → classifier `linux`
-  - Perfil `windows` → classifier `win`
-  - Perfil `mac` → classifier `mac`
-- Se agregó `javafx-maven-plugin` para facilitar la ejecución con `mvn javafx:run`.
+Nuevos, porque el correo de banco no llega sin ellos:
 
-### 2. `AppConfig.java` — Ruta base por defecto
+- **Puente** — recibe el POST del Worker de Cloudflare (`/api/email-inbound`).
+- **Caddy** — portero local. El túnel deja el HTTPS en un puerto; Caddy lo pasa al puente / Angular / auth.
+- **Túnel Cloudflare** — cable a internet. El launcher lo deja como **inicio de sesión** para que sobreviva el reinicio:
+  - macOS: LaunchAgent (`~/Library/LaunchAgents/com.infinitesoft.cloudflared.*.plist`)
+  - Linux: systemd --user + `.desktop` en `~/.config/autostart`
+  - Windows: tarea programada ONLOGON (`InfinitoCloudflared-*`) con bucle si `cloudflared` se cae  
+  Iniciar / Reiniciar reaniman ese servicio en los tres SO. Detener todo no lo mata. Dev/Sandbox: `pos-local`. Tienda Infinito: token propio.
 
-- **Antes**: `C:/dev/repos`
-- **Ahora**: `$HOME/dev/repos`
-- Se adapta automáticamente al directorio home del usuario en Linux/macOS.
+**Iniciar todo** levanta en orden los Java, el front, el puente, Caddy y asegura el túnel. No toca Postgres Docker. Detener todo no apaga el túnel.
 
-### 3. `ServiceManager.java` — Comandos de sistema
+## Preparar esta máquina (puertos / firewall)
 
-| Función | Windows (original) | Linux/macOS (nuevo) |
-|---|---|---|
-| `LOGS_DIRECTORY` | `C:/dev/repos/.../logs` | `$HOME/.infinitesoft/logs` |
-| `start()` | `cmd.exe /c start /B ...` | `sh -c "... > log 2>&1"` |
-| `killProcessOnPort()` | `netstat -ano \| findstr` + `taskkill` | `lsof -ti :port` + `kill -9` |
-| `updateProject()` | `cmd.exe /c git pull / mvn / npm` | comandos directos `git pull`, `mvn`, `npm` |
-| `ensureFirewallRuleExists()` | PowerShell con UAC | Eliminado (no aplica en Linux/macOS) |
-| `discoverJavaBinDir()` | Windows paths | macOS: `/Library/Java/JavaVirtualMachines`, Linux: `/usr/lib/jvm` |
+El botón **Preparar esta máquina** corre un script según el sistema:
 
-### 4. `HelloController.java` — Rutas de aplicaciones externas
+- macOS / Linux: `prepare-host.sh`
+- Windows: `prepare-host.ps1` (mejor como Administrador si vas a crear reglas de firewall)
 
-- **onLaunchApp()**: 
-  - macOS: `open -a "Google Chrome"`, `open -a "Chromium"`, `open -a "Firefox"`, fallback `open <url>`
-  - Linux: `google-chrome`, `chromium-browser`, `firefox`
-- **onOpenLogs()**: `C:/dev/repos/.../logs` → `$HOME/.infinitesoft/logs`
-- **onOpenDbManager()**: 
-  - macOS: `open -a "DBeaver"`
-  - Linux: `dbeaver` / `dbeaver-ce`
+El túnel de Cloudflare **no necesita puertos abiertos a internet** (sale él hacia Cloudflare). Las reglas son para que una tablet o otra caja en la **LAN** llegue a esta PC (en v02: 4220, 8288, 8280, etc.).
 
-### 5. `HelloController.java` — Bug DirectoryChooser
+En Linux puede pedir `sudo`. En Windows, PowerShell como Administrador.
 
-- **Problema**: `setInitialDirectory()` lanzaba `IllegalArgumentException` si la carpeta no existía.
-- **Solución**: Se valida que el directorio exista antes de asignarlo como inicial.
-
-## Cómo ejecutar
-
-### macOS
+## Cómo ejecutar el launcher
 
 ```bash
-# Opción 1: Script dedicado
-./run-macos.sh
-
-# Opción 2: Maven
-mvn clean package -DskipTests && java -jar target/infinito-launcher.jar
-
-# Opción 3: Maven plugin
-mvn javafx:run
+cd intinito-launcher
+mvn -DskipTests package
+java -jar target/infinito-launcher.jar
 ```
 
-### Linux
+macOS: `./run-macos.sh` · Linux: `./infinito-launcher.sh` · Windows: el mismo `java -jar` con un JDK 11+.
 
-```bash
-# Opción 1: Script dedicado
-./infinito-launcher.sh
+JavaFX se elige con perfiles Maven (`mac` / `linux` / `windows`); no hace falta un jar distinto por lógica de negocio.
 
-# Opción 2: Maven
-mvn clean package -DskipTests && java -jar target/infinito-launcher.jar
+## Tienda Infinito (cuando montes esa PC)
 
-# Opción 3: Maven plugin
-mvn javafx:run
-```
-
-O desde IntelliJ: crear Run Configuration Maven con comando `javafx:run`.
+Runbook paso a paso (esta máquina, Windows/Linux/macOS): **`prompts-general-pos/MIGRATE-TIENDA-INFINITO-V02.md`**. Índice de docs: `prompts-general-pos/README.md`.

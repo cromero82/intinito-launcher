@@ -55,11 +55,13 @@ public class HostConfig {
     }
 
     public String getTicketsUrl() {
-        return "http://" + getLanHost() + ":4200/apps/tickets";
+        int port = AppConfig.getInstance().getEnvironment().getFrontPort();
+        return "http://" + getLanHost() + ":" + port + "/apps/tickets";
     }
 
     public String getLoginUrl() {
-        return "http://" + getLanHost() + ":4200/login";
+        int port = AppConfig.getInstance().getEnvironment().getFrontPort();
+        return "http://" + getLanHost() + ":" + port + "/login";
     }
 
     public void syncProjectMirror(String projectsBasePath) throws IOException {

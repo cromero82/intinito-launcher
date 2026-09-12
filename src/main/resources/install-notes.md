@@ -1,32 +1,29 @@
+# Instrucciones de instalación
 
-# Instrucciones de Instalación y Requisitos
+Infinito Launcher es un JAR JavaFX. Compílalo **en el mismo sistema** donde lo vas a correr (macOS, Linux o Windows) para que Maven elija el native de JavaFX correcto.
 
-## Requisitos Previos
+## Requisitos
 
-Para ejecutar la aplicación en un equipo Windows, necesitarás lo siguiente:
+- JDK 11 o superior en PATH ([Adoptium](https://adoptium.net/temurin/releases/?version=11))
+- Maven, solo si vas a compilar en esa máquina
+- Para los servicios: Docker (Postgres), npm (front), Caddy, cloudflared, según lo que arranques
 
-1.  **Java Runtime Environment (JRE) 11 o superior:** La aplicación está compilada con Java 11. Puedes descargar una versión compatible desde [Adoptium](https://adoptium.net/temurin/releases/?version=11).
+## Compilar y ejecutar
 
-## Generación del Ejecutable
+```bash
+cd intinito-launcher
+mvn -DskipTests package
+java -jar target/infinito-launcher.jar
+```
 
-Para crear un archivo ejecutable de la aplicación, sigue estos pasos:
+Atajos:
 
-1.  Abre una terminal en la raíz del proyecto.
-2.  Ejecuta el siguiente comando de Maven:
+- macOS: `./run-macos.sh`
+- Linux: `./run-linux.sh`
+- Windows: `powershell -ExecutionPolicy Bypass -File .\run-windows.ps1`
 
-    ```bash
-    mvn clean package
-    ```
+El JAR generado se llama `target/infinito-launcher.jar`.
 
-3.  Este comando generará un archivo JAR auto-contenido en la carpeta `target`. El archivo se llamará `launcher-1.0-SNAPSHOT.jar`.
+## Primera vez en una PC de tienda
 
-## Instalación y Ejecución en el Equipo de Destino
-
-1.  Copia el archivo `launcher-1.0-SNAPSHOT.jar` generado en el paso anterior al equipo donde quieres instalar la aplicación.
-2.  Para iniciar la aplicación, abre una terminal en la ubicación del archivo JAR y ejecuta el siguiente comando:
-
-    ```bash
-    java -jar launcher-1.0-SNAPSHOT.jar
-    ```
-
-Con estos pasos, tendrás un único archivo JAR que contiene tu aplicación y todas sus dependencias, listo para ser distribuido y ejecutado en cualquier máquina con Java 11 o superior.
+En el launcher: ambiente **Tienda Infinito** → **Preparar esta máquina** (abre puertos LAN / revisa PATH / instala el túnel al inicio de sesión). Copia `~/.cloudflared/tienda-infinito.token` a esa cuenta de usuario.

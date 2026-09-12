@@ -10,6 +10,7 @@ public class AppConfig {
     private static final String CONFIG_DIR = System.getProperty("user.home") + "/.infinitesoft";
     private static final String CONFIG_FILE = CONFIG_DIR + "/launcher.properties";
     private static final String KEY_BASE_PATH = "projects.base.path";
+    private static final String KEY_ENVIRONMENT = "launch.environment";
     private static final String DEFAULT_BASE_PATH = System.getProperty("user.home") + "/dev/repos";
 
     private static AppConfig instance;
@@ -39,6 +40,18 @@ public class AppConfig {
 
     public void setBasePath(String path) {
         props.setProperty(KEY_BASE_PATH, path);
+        save();
+    }
+
+    public LaunchEnvironment getEnvironment() {
+        return LaunchEnvironment.fromId(props.getProperty(KEY_ENVIRONMENT, LaunchEnvironment.DEV_LOCAL.getId()));
+    }
+
+    public void setEnvironment(LaunchEnvironment environment) {
+        if (environment == null) {
+            environment = LaunchEnvironment.DEV_LOCAL;
+        }
+        props.setProperty(KEY_ENVIRONMENT, environment.getId());
         save();
     }
 

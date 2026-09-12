@@ -2,14 +2,19 @@ package com.infinitesoft.launcher;
 
 import com.infinitesoft.launcher.core.AppConfig;
 import com.infinitesoft.launcher.core.HostConfig;
+import com.infinitesoft.launcher.core.LaunchEnvironment;
+import com.infinitesoft.launcher.core.PrepareHost;
 import com.infinitesoft.launcher.core.ServiceManager;
 import com.infinitesoft.launcher.core.ServiceStatus;
+import com.infinitesoft.launcher.core.V02MigrateRunner;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
@@ -22,6 +27,7 @@ import java.awt.Desktop;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
@@ -33,6 +39,9 @@ public class HelloController {
     private final ServiceManager serviceManager = new ServiceManager();
     private final ScheduledExecutorService uiRefresher = Executors.newSingleThreadScheduledExecutor();
 
+    @FXML private ComboBox<LaunchEnvironment> comboEnvironment;
+    @FXML private Button btnEjecutarScripts;
+    @FXML private Label labelMigrateStatus;
     @FXML private Button launchAppButton;
     @FXML private Label labelGeneralStatus;
     @FXML private Label labelTunnelUrl;
@@ -42,10 +51,18 @@ public class HelloController {
     @FXML private Label statusSecurity;
     @FXML private Label statusSmtp;
     @FXML private Label statusStore;
+    @FXML private Label statusPuente;
     @FXML private Label statusFront;
+    @FXML private Label statusCaddy;
+    @FXML private Label statusTunnel;
+    private boolean ignoreEnvironmentCallback;
 
     @FXML
     public void initialize() {
+        ignoreEnvironmentCallback = true;
+        comboEnvironment.getItems().setAll(LaunchEnvironment.values());
+        comboEnvironment.setValue(serviceManager.getEnvironment());
+        ignoreEnvironmentCallback = false;
         labelBasePath.setText(AppConfig.getInstance().getBasePath());
         refreshLanHostLabel();
         try {
@@ -53,6 +70,7 @@ public class HelloController {
         } catch (IOException ignored) {
             // El mirror es informativo; la fuente de verdad es ~/.infinitesoft/host-ip.txt
         }
+        refreshMigrateUi();
         uiRefresher.scheduleAtFixedRate(this::refreshUI, 0, 1500, TimeUnit.MILLISECONDS);
     }
 
@@ -72,14 +90,32 @@ public class HelloController {
             setStatusLabel(statusSecurity, map.getOrDefault(ServiceManager.NAME_SECURITY, ServiceStatus.NOT_RUNNING));
             setStatusLabel(statusSmtp, map.getOrDefault(ServiceManager.NAME_SMTP, ServiceStatus.NOT_RUNNING));
             setStatusLabel(statusStore, map.getOrDefault(ServiceManager.NAME_STORE, ServiceStatus.NOT_RUNNING));
+            setStatusLabel(statusPuente, map.getOrDefault(ServiceManager.NAME_PUENTE, ServiceStatus.NOT_RUNNING));
             setStatusLabel(statusFront, map.getOrDefault(ServiceManager.NAME_FRONT, ServiceStatus.NOT_RUNNING));
+            setStatusLabel(statusCaddy, map.getOrDefault(ServiceManager.NAME_CADDY, ServiceStatus.NOT_RUNNING));
+            setStatusLabel(statusTunnel, map.getOrDefault(ServiceManager.NAME_TUNNEL, ServiceStatus.NOT_RUNNING));
 
             computeGeneralStatus(map);
 
-            serviceManager.findMicotizacionTunnelUrl().ifPresentOrElse(
-                    url -> labelTunnelUrl.setText("Cotización: " + url),
-                    () -> labelTunnelUrl.setText("Cotización: túnel pendiente…")
-            );
+            LaunchEnvironment env = serviceManager.getEnvironment();
+            if (env.startsTunnel() && env.getPublicHostname() != null && !env.getPublicHostname().isBlank()) {
+                labelTunnelUrl.setText("Público: https://" + env.getPublicHostname());
+            } else {
+                labelTunnelUrl.setText("Sin túnel / sin notificaciones (copia local)");
+            }
+            if (!env.startsSmtp()) {
+                statusSmtp.setText("No aplica");
+            }
+            if (!env.startsPuente()) {
+                statusPuente.setText("No aplica");
+            }
+            if (!env.startsCaddy()) {
+                statusCaddy.setText("No aplica");
+            }
+            if (!env.startsTunnel()) {
+                statusTunnel.setText("No aplica");
+            }
+            refreshMigrateUi();
 
             boolean allRequiredRunning = map.get(ServiceManager.NAME_FRONT) == ServiceStatus.RUNNING &&
                     map.get(ServiceManager.NAME_STORE) == ServiceStatus.RUNNING &&
@@ -115,10 +151,16 @@ public class HelloController {
     }
 
     private void computeGeneralStatus(Map<String, ServiceStatus> map) {
-        boolean anyFailed = map.values().stream().anyMatch(s -> s == ServiceStatus.FAILED);
-        boolean anyStarting = map.values().stream().anyMatch(s -> s == ServiceStatus.STARTING);
-        boolean allRunning = map.values().stream().allMatch(s -> s == ServiceStatus.RUNNING);
-        boolean allStopped = map.values().stream().allMatch(s -> s == ServiceStatus.NOT_RUNNING);
+        java.util.Collection<ServiceStatus> managed = map.entrySet().stream()
+                .filter(e -> !ServiceManager.NAME_DB.equals(e.getKey())
+                        && !ServiceManager.NAME_TUNNEL.equals(e.getKey()))
+                .map(java.util.Map.Entry::getValue)
+                .collect(java.util.stream.Collectors.toList());
+
+        boolean anyFailed = managed.stream().anyMatch(s -> s == ServiceStatus.FAILED);
+        boolean anyStarting = managed.stream().anyMatch(s -> s == ServiceStatus.STARTING);
+        boolean allRunning = !managed.isEmpty() && managed.stream().allMatch(s -> s == ServiceStatus.RUNNING);
+        boolean allStopped = managed.stream().allMatch(s -> s == ServiceStatus.NOT_RUNNING);
 
         String statusText;
         String statusStyle;
@@ -148,7 +190,9 @@ public class HelloController {
 
     @FXML
     protected void onLaunchApp() {
-        final String url = "http://localhost:4200/login";
+        final String url = "http://localhost:"
+                + AppConfig.getInstance().getEnvironment().getFrontPort()
+                + "/login";
         String osName = System.getProperty("os.name").toLowerCase();
 
         if (osName.contains("mac")) {
@@ -324,6 +368,146 @@ public class HelloController {
     }
 
     @FXML
+    protected void onEnvironmentChanged() {
+        if (ignoreEnvironmentCallback) {
+            return;
+        }
+        LaunchEnvironment selected = comboEnvironment.getValue();
+        if (selected == null || selected == serviceManager.getEnvironment()) {
+            return;
+        }
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.setTitle("Cambiar ambiente");
+        confirm.setHeaderText("Pasar a «" + selected.getLabel() + "»");
+        confirm.setContentText(
+                "Se detendrán los servicios que este launcher haya arrancado y se usarán "
+                        + "los puertos y carpetas de ese ambiente.\n\n"
+                        + "Dev local: laptop (4200 / 8088), negocio en controlneg_rmx_db_v02, login en controlneg_rmx_db.\n"
+                        + "Sandbox: repos/sandbox (4210 / 8188), BD sandbox.\n"
+                        + "Caja actual: copia productiva (4200 / 8088 / controlneg_rmx_db), sin Caddy ni correos.\n"
+                        + "Tienda Infinito: pila nueva (4220 / 8288 / 8295 / Caddy 8280), "
+                        + "BD controlneg_rmx_db_v02, correos tienda-infinito@mayaksoluciones.com.\n"
+                        + "No elijas Tienda Infinito en la laptop salvo que ella sea la caja."
+        );
+        confirm.showAndWait().ifPresent(btn -> {
+            if (btn != ButtonType.OK) {
+                ignoreEnvironmentCallback = true;
+                comboEnvironment.setValue(serviceManager.getEnvironment());
+                ignoreEnvironmentCallback = false;
+                return;
+            }
+            serviceManager.applyEnvironment(selected);
+            refreshLanHostLabel();
+            refreshMigrateUi();
+        });
+    }
+
+    private void refreshMigrateUi() {
+        if (btnEjecutarScripts == null || labelMigrateStatus == null) {
+            return;
+        }
+        LaunchEnvironment env = serviceManager.getEnvironment();
+        boolean allowed = env.allowsV02Migrate();
+        boolean done = V02MigrateRunner.alreadyApplied();
+        btnEjecutarScripts.setDisable(!allowed || done);
+        if (!allowed) {
+            labelMigrateStatus.setText("Scripts: solo en Tienda Infinito");
+        } else if (done) {
+            labelMigrateStatus.setText("Scripts ya aplicados (una vez)");
+        } else {
+            labelMigrateStatus.setText("Una vez: copia BD + migrate v02");
+        }
+    }
+
+    @FXML
+    protected void onEjecutarScripts() {
+        LaunchEnvironment env = serviceManager.getEnvironment();
+        if (!env.allowsV02Migrate()) {
+            showWarning("Ambiente", "Elige Tienda Infinito para ejecutar los scripts.");
+            return;
+        }
+        if (V02MigrateRunner.alreadyApplied()) {
+            showWarning("Ya aplicado", "Los scripts de v02 ya se ejecutaron en esta máquina.");
+            refreshMigrateUi();
+            return;
+        }
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.setTitle("Ejecutar scripts v02");
+        confirm.setHeaderText("Una sola vez — controlneg_rmx_db_v02");
+        confirm.setContentText(
+                "1) Si no existe, copia controlneg_rmx_db → controlneg_rmx_db_v02 (dump, no pisa la productiva).\n"
+                        + "2) Aplica schema dian-v2 + correcciones (Caja Menor / Dist. 64_, ventas 65_, correo 66_).\n"
+                        + "3) Deja email_alerta_pagos = tienda-infinito@mayaksoluciones.com.\n\n"
+                        + "No toca controlneg_rmx_db. Después el botón queda bloqueado."
+        );
+        if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) {
+            return;
+        }
+
+        TextArea logArea = new TextArea();
+        logArea.setEditable(false);
+        logArea.setWrapText(true);
+        logArea.setPrefHeight(360);
+        Button closeBtn = new Button("Cerrar");
+        closeBtn.setDisable(true);
+        VBox root = new VBox(8, logArea, closeBtn);
+        root.setPadding(new Insets(10));
+        Stage stage = new Stage();
+        stage.setTitle("Migración Tienda Infinito v02");
+        stage.setScene(new Scene(root, 720, 440));
+        stage.show();
+        closeBtn.setOnAction(e -> stage.close());
+
+        Path projects = Path.of(AppConfig.getInstance().getBasePath());
+        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                V02MigrateRunner.run(projects, line -> Platform.runLater(() -> {
+                    logArea.appendText(line + "\n");
+                    logArea.setScrollTop(Double.MAX_VALUE);
+                }));
+                Platform.runLater(() -> {
+                    closeBtn.setDisable(false);
+                    refreshMigrateUi();
+                    showInfo("Scripts aplicados", "v02 listo. Inicia Tienda Infinito (Caddy + puente + túnel) para correos.");
+                });
+            } catch (Exception ex) {
+                Platform.runLater(() -> {
+                    logArea.appendText("ERROR: " + ex.getMessage() + "\n");
+                    closeBtn.setDisable(false);
+                    showWarning("Migración incompleta", ex.getMessage());
+                });
+            }
+        });
+    }
+
+    @FXML
+    protected void onPrepareHost() {
+        TextArea logArea = new TextArea();
+        logArea.setEditable(false);
+        logArea.setWrapText(true);
+        logArea.setPrefHeight(360);
+        Button closeBtn = new Button("Cerrar");
+        VBox root = new VBox(8, logArea, closeBtn);
+        root.setPadding(new Insets(10));
+        Stage stage = new Stage();
+        stage.setTitle("Preparar esta máquina");
+        stage.setScene(new Scene(root, 680, 420));
+        stage.show();
+        closeBtn.setOnAction(e -> stage.close());
+        LaunchEnvironment env = serviceManager.getEnvironment();
+        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                PrepareHost.run(env, line -> Platform.runLater(() -> {
+                    logArea.appendText(line + "\n");
+                    logArea.setScrollTop(Double.MAX_VALUE);
+                }));
+            } catch (Exception ex) {
+                Platform.runLater(() -> logArea.appendText("ERROR: " + ex.getMessage() + "\n"));
+            }
+        });
+    }
+
+    @FXML
     protected void onSelectProjectsFolder() {
         DirectoryChooser chooser = new DirectoryChooser();
         chooser.setTitle("Seleccionar carpeta de proyectos");
@@ -373,6 +557,12 @@ public class HelloController {
                     }
                 }
             }
+        } else if (osName.contains("win")) {
+            try {
+                new ProcessBuilder("cmd.exe", "/c", "start", "", "dbeaver").start();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         } else {
             try {
                 new ProcessBuilder("dbeaver").start();
@@ -418,7 +608,13 @@ public class HelloController {
     @FXML protected void onUpdateSecurity() { openUpdateWindow("Seguridad", ServiceManager.NAME_SECURITY); }
 
     // SMTP
-    @FXML protected void onStartSmtp() { serviceManager.start(ServiceManager.NAME_SMTP); }
+    @FXML protected void onStartSmtp() {
+        if (!serviceManager.getEnvironment().startsSmtp()) {
+            showWarning("No aplica", "Caja actual no levanta SMTP ni notificaciones.");
+            return;
+        }
+        serviceManager.start(ServiceManager.NAME_SMTP);
+    }
     @FXML protected void onStopSmtp() { serviceManager.stop(ServiceManager.NAME_SMTP); }
     @FXML protected void onRestartSmtp() { serviceManager.restart(ServiceManager.NAME_SMTP); }
     @FXML protected void onUpdateSmtp() { openUpdateWindow("Correos (SMTP)", ServiceManager.NAME_SMTP); }
@@ -434,6 +630,36 @@ public class HelloController {
     @FXML protected void onStopFront() { serviceManager.stop(ServiceManager.NAME_FRONT); }
     @FXML protected void onRestartFront() { serviceManager.restart(ServiceManager.NAME_FRONT); }
     @FXML protected void onUpdateFront() { openUpdateWindow("Frontend", ServiceManager.NAME_FRONT); }
+
+    @FXML protected void onStartPuente() {
+        if (!serviceManager.getEnvironment().startsPuente()) {
+            showWarning("No aplica", "Caja actual no recibe correo de banco (sin puente).");
+            return;
+        }
+        serviceManager.start(ServiceManager.NAME_PUENTE);
+    }
+    @FXML protected void onStopPuente() { serviceManager.stop(ServiceManager.NAME_PUENTE); }
+    @FXML protected void onRestartPuente() { serviceManager.restart(ServiceManager.NAME_PUENTE); }
+    @FXML protected void onUpdatePuente() { openUpdateWindow("Puente", ServiceManager.NAME_PUENTE); }
+
+    @FXML protected void onStartCaddy() {
+        if (!serviceManager.getEnvironment().startsCaddy()) {
+            showWarning("No aplica", "Caja actual no usa Caddy.");
+            return;
+        }
+        serviceManager.start(ServiceManager.NAME_CADDY);
+    }
+    @FXML protected void onStopCaddy() { serviceManager.stop(ServiceManager.NAME_CADDY); }
+    @FXML protected void onRestartCaddy() { serviceManager.restart(ServiceManager.NAME_CADDY); }
+
+    @FXML protected void onStartTunnel() {
+        if (!serviceManager.getEnvironment().startsTunnel()) {
+            showWarning("No aplica", "Caja actual no usa túnel Cloudflare.");
+            return;
+        }
+        serviceManager.start(ServiceManager.NAME_TUNNEL);
+    }
+    @FXML protected void onRestartTunnel() { serviceManager.restart(ServiceManager.NAME_TUNNEL); }
 
     private void openUpdateWindow(String serviceName, String serviceKey) {
         TextArea logArea = new TextArea();
