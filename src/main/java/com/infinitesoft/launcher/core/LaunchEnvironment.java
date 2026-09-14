@@ -6,10 +6,10 @@ import java.nio.file.Path;
  * Ambiente que el launcher levanta. Cambia puertos, carpeta de repos y hostname público.
  * En la PC de tienda: {@link #CAJA_ACTUAL} = copia productiva
  * ({@code controlneg_rmx_db}, :4200/:8088, sin Caddy ni notificaciones);
- * {@link #TIENDA_INFINITO} = pila v02 (:4220/:8288/{@code controlneg_rmx_db_v02})
- * con túnel y correo Cloudflare.
- * En la laptop, {@link #DEV_LOCAL} apunta el POS/puente a {@code controlneg_rmx_db_v02}
- * (ensayo migrate); el login sigue en {@code controlneg_rmx_db}.
+ * {@link #TIENDA_INFINITO} = producción (:4220/:8288/{@code controlneg_rmx_db_v02})
+ * con túnel y correo Cloudflare. La BD ya va migrada; el launcher no aplica scripts.
+ * En la laptop, {@link #DEV_LOCAL} apunta el POS/puente a {@code controlneg_rmx_db_v02};
+ * el login sigue en {@code controlneg_rmx_db}.
  */
 public enum LaunchEnvironment {
     DEV_LOCAL(
@@ -32,8 +32,7 @@ public enum LaunchEnvironment {
             true,
             true,
             true,
-            true,
-            false
+            true
     ),
     SANDBOX(
             "sandbox",
@@ -55,8 +54,7 @@ public enum LaunchEnvironment {
             true,
             true,
             true,
-            true,
-            false
+            true
     ),
     CAJA_ACTUAL(
             "caja-actual",
@@ -75,7 +73,6 @@ public enum LaunchEnvironment {
             8095,
             3001,
             46494,
-            false,
             false,
             false,
             false,
@@ -98,7 +95,6 @@ public enum LaunchEnvironment {
             8295,
             3021,
             46495,
-            true,
             true,
             true,
             true,
@@ -125,7 +121,6 @@ public enum LaunchEnvironment {
     private final boolean startsPuente;
     private final boolean startsCaddy;
     private final boolean startsTunnel;
-    private final boolean allowsV02Migrate;
 
     LaunchEnvironment(
             String id,
@@ -147,8 +142,7 @@ public enum LaunchEnvironment {
             boolean startsSmtp,
             boolean startsPuente,
             boolean startsCaddy,
-            boolean startsTunnel,
-            boolean allowsV02Migrate
+            boolean startsTunnel
     ) {
         this.id = id;
         this.label = label;
@@ -170,7 +164,6 @@ public enum LaunchEnvironment {
         this.startsPuente = startsPuente;
         this.startsCaddy = startsCaddy;
         this.startsTunnel = startsTunnel;
-        this.allowsV02Migrate = allowsV02Migrate;
     }
 
     public static LaunchEnvironment fromId(String raw) {
@@ -236,10 +229,6 @@ public enum LaunchEnvironment {
 
     public boolean startsTunnel() {
         return startsTunnel;
-    }
-
-    public boolean allowsV02Migrate() {
-        return allowsV02Migrate;
     }
 
     public String getTunnelName() {

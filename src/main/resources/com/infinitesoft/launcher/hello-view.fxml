@@ -36,8 +36,6 @@
             <children>
                 <Label text="Ambiente:" style="-fx-font-size: 12px;" />
                 <ComboBox fx:id="comboEnvironment" prefWidth="200" onAction="#onEnvironmentChanged" />
-                <Button fx:id="btnEjecutarScripts" mnemonicParsing="false" onAction="#onEjecutarScripts" text="Ejecutar scripts" />
-                <Label fx:id="labelMigrateStatus" text="" style="-fx-font-size: 11px; -fx-text-fill: #555;" wrapText="true" maxWidth="220" />
                 <Button mnemonicParsing="false" onAction="#onPrepareHost" text="Preparar esta máquina" />
                 <Label fx:id="labelLanHost" text="IP LAN: 192.168.1.6" style="-fx-font-size: 11px; -fx-text-fill: #555;" />
                 <Label fx:id="labelTunnelUrl" text="Público: túnel pendiente…" style="-fx-font-size: 11px; -fx-text-fill: #555;" wrapText="true" maxWidth="280" />

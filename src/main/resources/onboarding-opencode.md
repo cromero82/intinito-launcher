@@ -2,6 +2,8 @@
 
 **Infinito Launcher** (`intinito-launcher`, el nombre del repo lleva un typo histórico) es un panel JavaFX para **arrancar y parar** los procesos del POS en **esta máquina**. No sustituye a IntelliJ: es el control de lo que ya está compilado (JAR / npm).
 
+**Contexto general de la app e instalación en producción:** el repo hermano `prompts-general-pos/` (mismo path `…/repos/`). En la PC de tienda abre `CURSOR-IA-PC-TIENDA-V02.md`. Este launcher no guarda el runbook ni aplica migraciones.
+
 Sirve en **Windows, macOS y Linux**. Elige el ambiente arriba y luego inicia servicios uno a uno, o **Iniciar todo**.
 
 ## Ambientes
@@ -11,9 +13,9 @@ Sirve en **Windows, macOS y Linux**. Elige el ambiente arriba y luego inicia ser
 | **Dev local** | Laptop de desarrollo | 4200 | 8088 | 8095 | 8080 | `cotiza.mayaksoluciones.com` |
 | **Sandbox** | Copia del tester (`repos/sandbox/…`) | 4210 | 8188 | 8195 | 8180 | `pos-sandbox.mayaksoluciones.com` |
 | **Caja actual** | Copia productiva vieja (`controlneg_rmx_db`) | 4200 | 8088 | — | — | — (sin notificaciones) |
-| **Tienda Infinito** | Pila v02 (`controlneg_rmx_db_v02`) + correo CF | 4220 | 8288 | 8295 | 8280 | `tienda-infinito.mayaksoluciones.com` |
+| **Tienda Infinito** | Producción (`controlneg_rmx_db_v02` ya migrada) + correo CF | 4220 | 8288 | 8295 | 8280 | `tienda-infinito.mayaksoluciones.com` |
 
-En **Tienda Infinito**, **Ejecutar scripts** (una vez): dump → `controlneg_rmx_db_v02` + manifiesto (`64_` Caja Menor, `65_` ventas, `66_` `tienda-infinito@`). Luego el botón se bloquea.
+**Tienda Infinito** no tiene **Ejecutar scripts**: la BD llega lista. Solo **Iniciar todo** / Preparar esta máquina.
 
 La ruta de proyectos (pie de ventana) es la carpeta `repos`. En Sandbox el launcher entra solo a `repos/sandbox`. En Dev y Tienda Infinito usa los proyectos de esa carpeta.
 

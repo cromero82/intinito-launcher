@@ -6,7 +6,6 @@ import com.infinitesoft.launcher.core.LaunchEnvironment;
 import com.infinitesoft.launcher.core.PrepareHost;
 import com.infinitesoft.launcher.core.ServiceManager;
 import com.infinitesoft.launcher.core.ServiceStatus;
-import com.infinitesoft.launcher.core.V02MigrateRunner;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
@@ -27,7 +26,6 @@ import java.awt.Desktop;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
@@ -40,8 +38,6 @@ public class HelloController {
     private final ScheduledExecutorService uiRefresher = Executors.newSingleThreadScheduledExecutor();
 
     @FXML private ComboBox<LaunchEnvironment> comboEnvironment;
-    @FXML private Button btnEjecutarScripts;
-    @FXML private Label labelMigrateStatus;
     @FXML private Button launchAppButton;
     @FXML private Label labelGeneralStatus;
     @FXML private Label labelTunnelUrl;
@@ -70,7 +66,6 @@ public class HelloController {
         } catch (IOException ignored) {
             // El mirror es informativo; la fuente de verdad es ~/.infinitesoft/host-ip.txt
         }
-        refreshMigrateUi();
         uiRefresher.scheduleAtFixedRate(this::refreshUI, 0, 1500, TimeUnit.MILLISECONDS);
     }
 
@@ -115,7 +110,6 @@ public class HelloController {
             if (!env.startsTunnel()) {
                 statusTunnel.setText("No aplica");
             }
-            refreshMigrateUi();
 
             boolean allRequiredRunning = map.get(ServiceManager.NAME_FRONT) == ServiceStatus.RUNNING &&
                     map.get(ServiceManager.NAME_STORE) == ServiceStatus.RUNNING &&
@@ -385,8 +379,9 @@ public class HelloController {
                         + "Dev local: laptop (4200 / 8088), negocio en controlneg_rmx_db_v02, login en controlneg_rmx_db.\n"
                         + "Sandbox: repos/sandbox (4210 / 8188), BD sandbox.\n"
                         + "Caja actual: copia productiva (4200 / 8088 / controlneg_rmx_db), sin Caddy ni correos.\n"
-                        + "Tienda Infinito: pila nueva (4220 / 8288 / 8295 / Caddy 8280), "
-                        + "BD controlneg_rmx_db_v02, correos tienda-infinito@mayaksoluciones.com.\n"
+                        + "Tienda Infinito: producción (4220 / 8288 / 8295 / Caddy 8280), "
+                        + "BD controlneg_rmx_db_v02 ya migrada (sin scripts), "
+                        + "correos tienda-infinito@mayaksoluciones.com.\n"
                         + "No elijas Tienda Infinito en la laptop salvo que ella sea la caja."
         );
         confirm.showAndWait().ifPresent(btn -> {
@@ -398,85 +393,6 @@ public class HelloController {
             }
             serviceManager.applyEnvironment(selected);
             refreshLanHostLabel();
-            refreshMigrateUi();
-        });
-    }
-
-    private void refreshMigrateUi() {
-        if (btnEjecutarScripts == null || labelMigrateStatus == null) {
-            return;
-        }
-        LaunchEnvironment env = serviceManager.getEnvironment();
-        boolean allowed = env.allowsV02Migrate();
-        boolean done = V02MigrateRunner.alreadyApplied();
-        btnEjecutarScripts.setDisable(!allowed || done);
-        if (!allowed) {
-            labelMigrateStatus.setText("Scripts: solo en Tienda Infinito");
-        } else if (done) {
-            labelMigrateStatus.setText("Scripts ya aplicados (una vez)");
-        } else {
-            labelMigrateStatus.setText("Una vez: copia BD + migrate v02");
-        }
-    }
-
-    @FXML
-    protected void onEjecutarScripts() {
-        LaunchEnvironment env = serviceManager.getEnvironment();
-        if (!env.allowsV02Migrate()) {
-            showWarning("Ambiente", "Elige Tienda Infinito para ejecutar los scripts.");
-            return;
-        }
-        if (V02MigrateRunner.alreadyApplied()) {
-            showWarning("Ya aplicado", "Los scripts de v02 ya se ejecutaron en esta máquina.");
-            refreshMigrateUi();
-            return;
-        }
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
-        confirm.setTitle("Ejecutar scripts v02");
-        confirm.setHeaderText("Una sola vez — controlneg_rmx_db_v02");
-        confirm.setContentText(
-                "1) Si no existe, copia controlneg_rmx_db → controlneg_rmx_db_v02 (dump, no pisa la productiva).\n"
-                        + "2) Aplica schema dian-v2 + correcciones (Caja Menor / Dist. 64_, ventas 65_, correo 66_).\n"
-                        + "3) Deja email_alerta_pagos = tienda-infinito@mayaksoluciones.com.\n\n"
-                        + "No toca controlneg_rmx_db. Después el botón queda bloqueado."
-        );
-        if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) {
-            return;
-        }
-
-        TextArea logArea = new TextArea();
-        logArea.setEditable(false);
-        logArea.setWrapText(true);
-        logArea.setPrefHeight(360);
-        Button closeBtn = new Button("Cerrar");
-        closeBtn.setDisable(true);
-        VBox root = new VBox(8, logArea, closeBtn);
-        root.setPadding(new Insets(10));
-        Stage stage = new Stage();
-        stage.setTitle("Migración Tienda Infinito v02");
-        stage.setScene(new Scene(root, 720, 440));
-        stage.show();
-        closeBtn.setOnAction(e -> stage.close());
-
-        Path projects = Path.of(AppConfig.getInstance().getBasePath());
-        Executors.newSingleThreadExecutor().execute(() -> {
-            try {
-                V02MigrateRunner.run(projects, line -> Platform.runLater(() -> {
-                    logArea.appendText(line + "\n");
-                    logArea.setScrollTop(Double.MAX_VALUE);
-                }));
-                Platform.runLater(() -> {
-                    closeBtn.setDisable(false);
-                    refreshMigrateUi();
-                    showInfo("Scripts aplicados", "v02 listo. Inicia Tienda Infinito (Caddy + puente + túnel) para correos.");
-                });
-            } catch (Exception ex) {
-                Platform.runLater(() -> {
-                    logArea.appendText("ERROR: " + ex.getMessage() + "\n");
-                    closeBtn.setDisable(false);
-                    showWarning("Migración incompleta", ex.getMessage());
-                });
-            }
         });
     }
 
