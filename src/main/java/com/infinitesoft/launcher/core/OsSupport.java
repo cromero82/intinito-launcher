@@ -42,6 +42,17 @@ public final class OsSupport {
         } else {
             pb = new ProcessBuilder("sh", "-c", command);
         }
+        return startLogged(pb, workDir, logFile, extraEnv);
+    }
+
+    /** Arranque por argv (sin shell). Evita PATH/comillas rotas en Windows. */
+    public static Process startLogged(List<String> command, File workDir, Path logFile, Map<String, String> extraEnv)
+            throws IOException {
+        return startLogged(new ProcessBuilder(command), workDir, logFile, extraEnv);
+    }
+
+    private static Process startLogged(ProcessBuilder pb, File workDir, Path logFile, Map<String, String> extraEnv)
+            throws IOException {
         if (workDir != null) {
             pb.directory(workDir);
         }
@@ -181,12 +192,14 @@ public final class OsSupport {
                 return;
             }
             if (isWindows()) {
-                new ProcessBuilder("taskkill", "/F", "/PID", String.valueOf(targetPid)).start();
+                new ProcessBuilder("taskkill", "/F", "/T", "/PID", String.valueOf(targetPid))
+                        .start()
+                        .waitFor();
             } else {
-                new ProcessBuilder("kill", "-9", String.valueOf(targetPid)).start();
+                new ProcessBuilder("kill", "-9", String.valueOf(targetPid)).start().waitFor();
             }
-        } catch (NumberFormatException | IOException ignored) {
-            // PID ilegible o proceso ya cerrado
+        } catch (NumberFormatException | IOException | InterruptedException ignored) {
+            Thread.interrupted();
         }
     }
 }

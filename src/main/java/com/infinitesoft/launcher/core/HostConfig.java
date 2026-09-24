@@ -56,12 +56,76 @@ public class HostConfig {
 
     public String getTicketsUrl() {
         int port = AppConfig.getInstance().getEnvironment().getFrontPort();
-        return "http://" + getLanHost() + ":" + port + "/apps/tickets";
+        return "http://127.0.0.1:" + port + "/apps/tickets";
     }
 
     public String getLoginUrl() {
         int port = AppConfig.getInstance().getEnvironment().getFrontPort();
-        return "http://" + getLanHost() + ":" + port + "/login";
+        return "http://127.0.0.1:" + port + "/login";
+    }
+
+    public String getLanTicketsUrl() {
+        int port = AppConfig.getInstance().getEnvironment().getFrontPort();
+        return "http://" + getLanHost() + ":" + port + "/apps/tickets";
+    }
+
+    /**
+     * Si la IP guardada ya no está en esta máquina (DHCP / reinicio de router),
+     * escribe la IPv4 LAN actual.
+     */
+    public synchronized String refreshLanHostIfChanged() {
+        String detected = discoverLanHost();
+        if (detected == null) {
+            return getLanHost();
+        }
+        try {
+            String current = getLanHost();
+            if (!detected.equals(current)) {
+                setLanHost(detected);
+            }
+            return detected;
+        } catch (IOException e) {
+            return getLanHost();
+        }
+    }
+
+    public static String discoverLanHost() {
+        String preferred = null;
+        try {
+            var ifaces = java.net.NetworkInterface.getNetworkInterfaces();
+            while (ifaces.hasMoreElements()) {
+                var nif = ifaces.nextElement();
+                if (!nif.isUp() || nif.isLoopback() || nif.isVirtual()) {
+                    continue;
+                }
+                String display = nif.getDisplayName() == null ? "" : nif.getDisplayName().toLowerCase();
+                if (display.contains("virtual") || display.contains("vmware")
+                        || display.contains("hyper-v") || display.contains("docker")
+                        || display.contains("vbox") || display.contains("loopback")) {
+                    continue;
+                }
+                var addrs = nif.getInetAddresses();
+                while (addrs.hasMoreElements()) {
+                    var addr = addrs.nextElement();
+                    if (!(addr instanceof java.net.Inet4Address) || addr.isLoopbackAddress()
+                            || addr.isLinkLocalAddress()) {
+                        continue;
+                    }
+                    String ip = addr.getHostAddress();
+                    if (ip.startsWith("169.254.")) {
+                        continue;
+                    }
+                    if (ip.startsWith("192.168.") || ip.startsWith("10.")) {
+                        return ip;
+                    }
+                    if (preferred == null) {
+                        preferred = ip;
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return preferred;
     }
 
     public void syncProjectMirror(String projectsBasePath) throws IOException {

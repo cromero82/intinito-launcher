@@ -51,6 +51,14 @@ public class HelloController {
     @FXML private Label statusFront;
     @FXML private Label statusCaddy;
     @FXML private Label statusTunnel;
+    @FXML private Label portDb;
+    @FXML private Label portSecurity;
+    @FXML private Label portSmtp;
+    @FXML private Label portStore;
+    @FXML private Label portPuente;
+    @FXML private Label portFront;
+    @FXML private Label portCaddy;
+    @FXML private Label portTunnel;
     private boolean ignoreEnvironmentCallback;
 
     @FXML
@@ -60,6 +68,11 @@ public class HelloController {
         comboEnvironment.setValue(serviceManager.getEnvironment());
         ignoreEnvironmentCallback = false;
         labelBasePath.setText(AppConfig.getInstance().getBasePath());
+        try {
+            HostConfig.getInstance().refreshLanHostIfChanged();
+            HostConfig.getInstance().syncProjectMirror(AppConfig.getInstance().getBasePath());
+        } catch (IOException ignored) {
+        }
         refreshLanHostLabel();
         try {
             HostConfig.getInstance().syncProjectMirror(AppConfig.getInstance().getBasePath());
@@ -75,7 +88,8 @@ public class HelloController {
     }
 
     private void refreshLanHostLabel() {
-        labelLanHost.setText("IP LAN: " + HostConfig.getInstance().getLanHost());
+        labelLanHost.setText("IP LAN: " + HostConfig.getInstance().getLanHost()
+                + "  (esta PC: 127.0.0.1:" + serviceManager.getEnvironment().getFrontPort() + ")");
     }
 
     private void refreshUI() {
@@ -89,6 +103,7 @@ public class HelloController {
             setStatusLabel(statusFront, map.getOrDefault(ServiceManager.NAME_FRONT, ServiceStatus.NOT_RUNNING));
             setStatusLabel(statusCaddy, map.getOrDefault(ServiceManager.NAME_CADDY, ServiceStatus.NOT_RUNNING));
             setStatusLabel(statusTunnel, map.getOrDefault(ServiceManager.NAME_TUNNEL, ServiceStatus.NOT_RUNNING));
+            refreshPortLabels();
 
             computeGeneralStatus(map);
 
@@ -100,15 +115,19 @@ public class HelloController {
             }
             if (!env.startsSmtp()) {
                 statusSmtp.setText("No aplica");
+                setPortText(portSmtp, null);
             }
             if (!env.startsPuente()) {
                 statusPuente.setText("No aplica");
+                setPortText(portPuente, null);
             }
             if (!env.startsCaddy()) {
                 statusCaddy.setText("No aplica");
+                setPortText(portCaddy, null);
             }
             if (!env.startsTunnel()) {
                 statusTunnel.setText("No aplica");
+                setPortText(portTunnel, null);
             }
 
             boolean allRequiredRunning = map.get(ServiceManager.NAME_FRONT) == ServiceStatus.RUNNING &&
@@ -117,6 +136,38 @@ public class HelloController {
                     map.get(ServiceManager.NAME_DB) == ServiceStatus.RUNNING;
             launchAppButton.setDisable(!allRequiredRunning);
         });
+    }
+
+    private void refreshPortLabels() {
+        setPortFromService(portDb, ServiceManager.NAME_DB);
+        setPortFromService(portSecurity, ServiceManager.NAME_SECURITY);
+        setPortFromService(portSmtp, ServiceManager.NAME_SMTP);
+        setPortFromService(portStore, ServiceManager.NAME_STORE);
+        setPortFromService(portPuente, ServiceManager.NAME_PUENTE);
+        setPortFromService(portFront, ServiceManager.NAME_FRONT);
+        setPortFromService(portCaddy, ServiceManager.NAME_CADDY);
+        setPortFromService(portTunnel, ServiceManager.NAME_TUNNEL);
+    }
+
+    private void setPortFromService(Label label, String serviceKey) {
+        if (label == null) {
+            return;
+        }
+        Integer port = serviceManager.getDefinition(serviceKey)
+                .map(def -> def.getTcpPort())
+                .orElse(null);
+        setPortText(label, port);
+    }
+
+    private void setPortText(Label label, Integer port) {
+        if (label == null) {
+            return;
+        }
+        if (port == null) {
+            label.setText("—");
+        } else {
+            label.setText(":" + port);
+        }
     }
 
     private void setStatusLabel(Label label, ServiceStatus status) {
@@ -184,64 +235,33 @@ public class HelloController {
 
     @FXML
     protected void onLaunchApp() {
-        final String url = "http://localhost:"
-                + AppConfig.getInstance().getEnvironment().getFrontPort()
-                + "/login";
-        String osName = System.getProperty("os.name").toLowerCase();
-
-        if (osName.contains("mac")) {
-            try {
-                new ProcessBuilder("open", "-a", "Google Chrome", "--args", "--app=" + url).start();
-            } catch (IOException e1) {
-                try {
-                    new ProcessBuilder("open", "-a", "Chromium", "--args", "--app=" + url).start();
-                } catch (IOException e2) {
-                    try {
-                        new ProcessBuilder("open", "-a", "Firefox", "--args", "--new-window", url).start();
-                    } catch (IOException e3) {
-                        try {
-                            new ProcessBuilder("open", url).start();
-                        } catch (IOException e4) {
-                            e4.printStackTrace();
-                        }
-                    }
-                }
-            }
-        } else if (osName.contains("linux")) {
-            try {
-                new ProcessBuilder("google-chrome", "--app=" + url).start();
-            } catch (IOException e1) {
-                try {
-                    new ProcessBuilder("chromium-browser", "--app=" + url).start();
-                } catch (IOException e2) {
-                    try {
-                        new ProcessBuilder("firefox", "--new-window", url).start();
-                    } catch (IOException e3) {
-                        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-                            try {
-                                Desktop.getDesktop().browse(new URI(url));
-                            } catch (Exception e4) {
-                                e4.printStackTrace();
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-                try {
-                    Desktop.getDesktop().browse(new URI(url));
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
-        }
+        openLocalPos("/login");
     }
 
     @FXML
     protected void onOpenBrowser() {
-        serviceManager.ensurePosServicesRunning();
-        openInBrowser(HostConfig.getInstance().getTicketsUrl());
+        openLocalPos("/apps/tickets");
+    }
+
+    private void openLocalPos(String path) {
+        LaunchEnvironment env = serviceManager.getEnvironment();
+        final String url = "http://127.0.0.1:" + env.getFrontPort() + path;
+        Executors.newSingleThreadExecutor().execute(() -> {
+            boolean up = serviceManager.waitUntilFrontListening(Duration.ofSeconds(90));
+            Platform.runLater(() -> {
+                if (!up) {
+                    showWarning(
+                            "Frontend aún no escucha",
+                            "Angular no abrió el puerto " + env.getFrontPort() + ".\n\n"
+                                    + "Reinicia Frontend en el launcher y espera a que pase de «Iniciando» a «Ejecutándose».\n"
+                                    + "No uses la IP LAN en esta PC: abre http://127.0.0.1:" + env.getFrontPort()
+                                    + "\nTablets: " + HostConfig.getInstance().getLanTicketsUrl()
+                    );
+                    return;
+                }
+                openInBrowser(url);
+            });
+        });
     }
 
     @FXML
@@ -316,12 +336,13 @@ public class HelloController {
                             "IP actualizada",
                             "Se guardó " + hostConfig.getLanHost() + " y se reinició el frontend "
                                     + "(Caddy + Cloudflare) para regenerar el túnel con la nueva red.\n\n"
-                                    + "POS LAN: " + hostConfig.getTicketsUrl()
+                                    + "POS LAN (tablets): " + hostConfig.getLanTicketsUrl()
                     );
                 } else if (changed) {
                     showInfo(
                             "IP actualizada",
-                            "Se guardó " + hostConfig.getLanHost() + ".\n\nPOS LAN: " + hostConfig.getTicketsUrl()
+                            "Se guardó " + hostConfig.getLanHost() + ".\n\nPOS LAN (tablets): "
+                                    + hostConfig.getLanTicketsUrl()
                     );
                 }
                 stage.close();
