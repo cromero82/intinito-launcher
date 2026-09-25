@@ -380,7 +380,7 @@ public class HelloController {
                         + "Sandbox: repos/sandbox (4210 / 8188), BD sandbox.\n"
                         + "Caja actual: copia productiva (4200 / 8088 / controlneg_rmx_db), sin Caddy ni correos.\n"
                         + "Tienda Infinito: producción (4220 / 8288 / 8295 / Caddy 8280), "
-                        + "BD controlneg_rmx_db_v02 ya migrada (sin scripts), "
+                        + "BD controlneg_rmx_db_v02 (sin scripts; cambios de BD = SQL NN_), "
                         + "correos tienda-infinito@mayaksoluciones.com.\n"
                         + "No elijas Tienda Infinito en la laptop salvo que ella sea la caja."
         );

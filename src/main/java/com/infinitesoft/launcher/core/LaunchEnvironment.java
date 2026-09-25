@@ -7,7 +7,7 @@ import java.nio.file.Path;
  * En la PC de tienda: {@link #CAJA_ACTUAL} = copia productiva
  * ({@code controlneg_rmx_db}, :4200/:8088, sin Caddy ni notificaciones);
  * {@link #TIENDA_INFINITO} = producción (:4220/:8288/{@code controlneg_rmx_db_v02})
- * con túnel y correo Cloudflare. La BD ya va migrada; el launcher no aplica scripts.
+ * con túnel y correo Cloudflare. El launcher no aplica scripts (cambios de BD = SQL `NN_…`).
  * En la laptop, {@link #DEV_LOCAL} apunta el POS/puente a {@code controlneg_rmx_db_v02};
  * el login sigue en {@code controlneg_rmx_db}.
  */

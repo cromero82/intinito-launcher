@@ -60,4 +60,4 @@ JavaFX se elige con perfiles Maven (`mac` / `linux` / `windows`); no hace falta 
 
 ## Tienda Infinito (cuando montes esa PC)
 
-Runbook paso a paso (esta máquina, Windows/Linux/macOS): **`prompts-general-pos/MIGRATE-TIENDA-INFINITO-V02.md`**. Índice de docs: `prompts-general-pos/README.md`.
+Instalación / PC de tienda: **`prompts-general-pos/CURSOR-IA-PC-TIENDA-V02.md`** (la BD llega ya migrada; este launcher no aplica scripts). Índice de docs: `prompts-general-pos/README.md`.
