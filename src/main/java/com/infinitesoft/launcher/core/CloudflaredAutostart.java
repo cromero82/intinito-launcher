@@ -13,7 +13,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -42,10 +41,7 @@ public final class CloudflaredAutostart {
 
     public static void ensureInstalledAndRunning(LaunchEnvironment env, Consumer<String> log) throws IOException {
         Consumer<String> out = log != null ? log : msg -> {};
-        Path binary = resolveCloudflaredBinary();
-        if (binary == null) {
-            throw new IOException("No está cloudflared en PATH ni en las rutas habituales.");
-        }
+        Path binary = CloudflaredSupport.ensureBinary();
         if (isReady(env) && autostartPresent(env)) {
             out.accept("Túnel " + connectorId(env) + " ya en ejecución (autostart).");
             return;
@@ -113,7 +109,10 @@ public final class CloudflaredAutostart {
             }
             Path yml = cfHome.resolve("config-tienda-infinito.yml");
             if (!Files.isRegularFile(yml)) {
-                throw new IOException("Falta " + token + " (o " + yml + ") para el túnel de Tienda Infinito.");
+                throw new IOException(
+                        "Falta el token del túnel Tienda Infinito: " + token
+                                + " (o " + yml + "). Sin él Cloudflare no puede entregar los correos "
+                                + "a esta máquina (error 1033). Copia tienda-infinito.token a esa ruta.");
             }
             args.add("--config");
             args.add(yml.toAbsolutePath().toString());
@@ -132,44 +131,7 @@ public final class CloudflaredAutostart {
     }
 
     static Path resolveCloudflaredBinary() {
-        List<Path> candidates = new ArrayList<>();
-        String which = firstLine(OsSupport.isWindows()
-                ? List.of("cmd.exe", "/c", "where cloudflared")
-                : List.of("sh", "-c", "command -v cloudflared"));
-        if (which != null && !which.isBlank()) {
-            String first = which.trim().split("\\r?\\n")[0].trim();
-            String lower = first.toLowerCase(Locale.ROOT);
-            if (!lower.contains("not found") && !lower.startsWith("info:")) {
-                candidates.add(Path.of(first));
-            }
-        }
-        String home = System.getProperty("user.home");
-        candidates.add(Path.of("/opt/homebrew/bin/cloudflared"));
-        candidates.add(Path.of("/usr/local/bin/cloudflared"));
-        candidates.add(Path.of("/usr/bin/cloudflared"));
-        candidates.add(Path.of("C:\\Program Files\\cloudflared\\cloudflared.exe"));
-        candidates.add(Path.of("C:\\Program Files (x86)\\cloudflared\\cloudflared.exe"));
-        candidates.add(Path.of("C:\\ProgramData\\chocolatey\\bin\\cloudflared.exe"));
-        candidates.add(Path.of(home, "scoop", "apps", "cloudflared", "current", "cloudflared.exe"));
-        candidates.add(Path.of(home, "bin", "cloudflared"));
-        candidates.add(Path.of(home, "bin", "cloudflared.exe"));
-        for (Path p : candidates) {
-            if (isUsableBinary(p)) {
-                return p.toAbsolutePath();
-            }
-        }
-        return null;
-    }
-
-    private static boolean isUsableBinary(Path p) {
-        if (p == null || !Files.isRegularFile(p)) {
-            return false;
-        }
-        if (OsSupport.isWindows()) {
-            String name = p.getFileName().toString().toLowerCase(Locale.ROOT);
-            return name.endsWith(".exe") || Files.isExecutable(p);
-        }
-        return Files.isExecutable(p);
+        return CloudflaredSupport.resolveBinary();
     }
 
     private static boolean autostartPresent(LaunchEnvironment env) {

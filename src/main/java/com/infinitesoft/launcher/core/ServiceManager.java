@@ -49,6 +49,7 @@ public class ServiceManager {
     private static final Path LOGS_DIRECTORY = Path.of(System.getProperty("user.home"), ".infinitesoft/logs");
     private static final DateTimeFormatter LOG_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final String JAVA_BIN_DIR = discoverJavaBinDir();
+    private static final String NODE_BIN_DIR = discoverNodeBinDir();
     private static final String MAVEN_CMD = discoverMvnCommand();
 
 
@@ -190,7 +191,7 @@ public class ServiceManager {
                 "Caddy (portero local del túnel)",
                 ServiceType.PROCESS,
                 root.resolve("infinito-ai-front"),
-                "caddy run --config " + environment.getCaddyfileName(),
+                caddyStartCommand(),
                 null,
                 null,
                 environment.getCaddyPort(),
@@ -238,6 +239,12 @@ public class ServiceManager {
         Path yml = cfHome.resolve("config.yml");
         return "cloudflared tunnel --metrics 127.0.0.1:" + environment.getTunnelMetricsPort()
                 + " --config \"" + yml + "\" run " + environment.getTunnelName();
+    }
+
+    private String caddyStartCommand() {
+        Path bin = CaddySupport.resolveBinary();
+        String exe = bin != null ? bin.toAbsolutePath().toString() : "caddy";
+        return exe + " run --config " + environment.getCaddyfileName();
     }
 
     private void ensureLogsDirectoryExists() {
@@ -300,20 +307,34 @@ public class ServiceManager {
                 return;
             }
             if (processes.containsKey(key) && processes.get(key).isAlive()) {
-                statuses.put(key, ServiceStatus.RUNNING);
-                return;
+                if (!key.equals(NAME_FRONT)) {
+                    statuses.put(key, ServiceStatus.RUNNING);
+                    return;
+                }
+                Process leftover = processes.remove(key);
+                if (leftover != null && leftover.isAlive()) {
+                    leftover.destroyForcibly();
+                }
             }
             statuses.put(key, ServiceStatus.STARTING);
+            Path logFilePath = null;
             try {
+                if (key.equals(NAME_FRONT)) {
+                    freeFrontPorts(def);
+                }
                 String timestamp = LocalDateTime.now().format(LOG_TIMESTAMP_FORMATTER);
                 String logFileName = String.format("%s-%s.log", key, timestamp);
-                Path logFilePath = LOGS_DIRECTORY.resolve(logFileName);
+                logFilePath = LOGS_DIRECTORY.resolve(logFileName);
 
-                String javaCmd = (JAVA_BIN_DIR != null) ? JAVA_BIN_DIR + File.separator + "java" : "java";
-                String fullCommand = def.getStartCommand().replaceFirst("^java\\s", javaCmd + " ");
+                // Keep bare "java". On Windows, cmd /c strips surrounding quotes when the
+                // line already has more quotes (e.g. --spring.*.password="..."), so an
+                // absolute "C:\Program Files\...\java" becomes C:Program and fails.
+                // PATH is prepended with JAVA_BIN_DIR below so the right JDK is found.
+                String fullCommand = def.getStartCommand();
 
                 Map<String, String> extraEnv = new java.util.HashMap<>();
                 extraEnv.put("PATH", mergedPath(JAVA_BIN_DIR));
+                extraEnv.put("Path", extraEnv.get("PATH"));
                 if (JAVA_BIN_DIR != null) {
                     extraEnv.put("JAVA_HOME", Path.of(JAVA_BIN_DIR).getParent().toString());
                 }
@@ -321,16 +342,33 @@ public class ServiceManager {
                     extraEnv.put("PORT", String.valueOf(environment.getHealthPort()));
                 }
 
-                Process process = OsSupport.startLogged(
-                        fullCommand,
-                        def.getWorkingDir().toFile(),
-                        logFilePath,
-                        extraEnv
-                );
+                Process process;
+                if (key.equals(NAME_CADDY)) {
+                    Path caddyBin = CaddySupport.ensureBinary();
+                    process = OsSupport.startLogged(
+                            CaddySupport.runCommand(caddyBin, environment.getCaddyfileName()),
+                            def.getWorkingDir().toFile(),
+                            logFilePath,
+                            extraEnv
+                    );
+                } else {
+                    process = OsSupport.startLogged(
+                            fullCommand,
+                            def.getWorkingDir().toFile(),
+                            logFilePath,
+                            extraEnv
+                    );
+                }
                 processes.put(key, process);
                 processLogFiles.put(key, logFilePath);
             } catch (IOException e) {
                 statuses.put(key, ServiceStatus.FAILED);
+                if (logFilePath != null) {
+                    try {
+                        Files.writeString(logFilePath, e.getMessage() + System.lineSeparator());
+                    } catch (IOException ignored) {
+                    }
+                }
                 e.printStackTrace();
             }
         });
@@ -463,7 +501,8 @@ public class ServiceManager {
         if (OsSupport.isMac()) {
             extra = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin";
         } else if (OsSupport.isWindows()) {
-            extra = "C:\\Windows\\System32;C:\\Windows";
+            extra = Path.of(System.getProperty("user.home"), ".infinitesoft", "bin")
+                    + ";C:\\Windows\\System32;C:\\Windows";
         } else {
             extra = "/usr/local/bin:/usr/bin:/bin";
         }
@@ -471,7 +510,22 @@ public class ServiceManager {
         if (javaBinDir != null) {
             combined = javaBinDir + File.pathSeparator + combined;
         }
+        if (NODE_BIN_DIR != null) {
+            combined = NODE_BIN_DIR + File.pathSeparator + combined;
+        }
         return combined;
+    }
+
+    private void freeFrontPorts(ServiceDefinition def) {
+        if (def.getTcpPort() != null) {
+            OsSupport.killProcessOnPort(def.getTcpPort(), OWN_PID);
+        }
+        OsSupport.killProcessOnPort(environment.getHealthPort(), OWN_PID);
+        try {
+            Thread.sleep(800);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private void applyShellPath(ProcessBuilder pb, String javaBinDir) {
@@ -651,6 +705,50 @@ public class ServiceManager {
         return "mvn";
     }
 
+    /**
+     * Angular CLI pide Node ≥ 20.19. En esta PC nvm deja v18 primero en PATH;
+     * preferimos {@code C:\\Program Files\\nodejs} (v24) u otra instalación reciente.
+     */
+    private static String discoverNodeBinDir() {
+        List<Path> candidates = new ArrayList<>();
+        candidates.add(Path.of("C:\\Program Files\\nodejs"));
+        candidates.add(Path.of(System.getProperty("user.home"), "AppData", "Local", "Programs", "nodejs"));
+        candidates.add(Path.of("/usr/local/bin"));
+        candidates.add(Path.of("/opt/homebrew/bin"));
+        String nvmDir = System.getenv("NVM_HOME");
+        if (nvmDir != null) {
+            candidates.add(Path.of(nvmDir));
+        }
+        candidates.add(Path.of("C:\\nvm4w"));
+        for (Path dir : candidates) {
+            Path exe = OsSupport.isWindows() ? dir.resolve("node.exe") : dir.resolve("node");
+            if (Files.isRegularFile(exe) && nodeMajor(exe) >= 20) {
+                return dir.toAbsolutePath().toString();
+            }
+        }
+        return null;
+    }
+
+    private static int nodeMajor(Path nodeExe) {
+        try {
+            Process p = new ProcessBuilder(nodeExe.toString(), "-v")
+                    .redirectErrorStream(true)
+                    .start();
+            String line;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                line = reader.readLine();
+            }
+            p.waitFor();
+            if (line == null) {
+                return 0;
+            }
+            String digits = line.trim().replaceFirst("^[vV]", "").split("\\.")[0];
+            return Integer.parseInt(digits);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
     private static String discoverJavaBinDir() {
         String javaHome = System.getenv("JAVA_HOME");
         if (javaHome != null) {
@@ -764,21 +862,42 @@ public class ServiceManager {
     }
 
     /**
-     * Front: Angular en su puerto cuenta como arriba aunque el health :3001
-     * siga en 503 (pasa si se cambia la fecha del sistema).
+     * Front: RUNNING solo si Angular escucha en su puerto (4220/4210/4200).
+     * El health :3021 puede estar UP con {@code ng serve} colgado en wait-on.
      */
     private boolean isDefinitionReachable(String key, ServiceDefinition def) {
-        if (key.equals(NAME_FRONT) && def.getTcpPort() != null
-                && healthChecker.isTcpOpen("localhost", def.getTcpPort(), 1000)) {
-            return true;
+        if (key.equals(NAME_FRONT)) {
+            return def.getTcpPort() != null
+                    && healthChecker.isTcpOpen("127.0.0.1", def.getTcpPort(), 1000);
         }
         if (def.getHealthUrl() != null) {
             return healthChecker.isHttpHealthy(def.getHealthUrl());
         }
         if (def.getTcpPort() != null) {
-            return healthChecker.isTcpOpen("localhost", def.getTcpPort(), 1000);
+            return healthChecker.isTcpOpen("127.0.0.1", def.getTcpPort(), 1000);
         }
         return false;
+    }
+
+    public boolean waitUntilFrontListening(Duration timeout) {
+        ensurePosServicesRunning();
+        Integer port = getDefinition(NAME_FRONT).map(ServiceDefinition::getTcpPort).orElse(null);
+        if (port == null) {
+            return false;
+        }
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            if (healthChecker.isTcpOpen("127.0.0.1", port, 1000)) {
+                return true;
+            }
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return healthChecker.isTcpOpen("127.0.0.1", port, 1000);
     }
 
     private void killProcessOnPort(int port) {

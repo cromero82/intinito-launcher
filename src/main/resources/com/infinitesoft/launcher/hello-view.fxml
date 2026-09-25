@@ -9,7 +9,7 @@
 <?import javafx.scene.layout.VBox?>
 <?import javafx.scene.text.Font?>
 
-<VBox maxHeight="-Infinity" maxWidth="-Infinity" minHeight="-Infinity" minWidth="-Infinity" prefHeight="680.0" prefWidth="920.0" xmlns="http://javafx.com/javafx/11" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.infinitesoft.launcher.HelloController">
+<VBox maxHeight="-Infinity" maxWidth="-Infinity" minHeight="-Infinity" minWidth="-Infinity" prefHeight="680.0" prefWidth="980.0" xmlns="http://javafx.com/javafx/11" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.infinitesoft.launcher.HelloController">
     <children>
         <HBox alignment="CENTER_LEFT" prefHeight="72.0" prefWidth="200.0" spacing="12.0" style="-fx-background-color: #f0f0f0;">
             <children>
@@ -53,7 +53,15 @@
                     <children>
                         <HBox alignment="CENTER_LEFT" spacing="10.0">
                             <children>
-                                <Label text="Base de Datos (DB)" prefWidth="220"/>
+                                <Label text="Servicio" prefWidth="200" style="-fx-font-weight: bold; -fx-text-fill: #555;"/>
+                                <Label text="Puerto" prefWidth="88" style="-fx-font-weight: bold; -fx-text-fill: #555;"/>
+                                <Label text="Estado" prefWidth="110" style="-fx-font-weight: bold; -fx-text-fill: #555;"/>
+                            </children>
+                        </HBox>
+                        <HBox alignment="CENTER_LEFT" spacing="10.0">
+                            <children>
+                                <Label text="Base de Datos (DB)" prefWidth="200"/>
+                                <Label fx:id="portDb" text=":5432" prefWidth="88" style="-fx-font-family: monospace; -fx-text-fill: #333;"/>
                                 <Label fx:id="statusDb" text="Detenido" prefWidth="110"/>
                                 <Button onAction="#onStartDb" text="Iniciar"/>
                                 <Button onAction="#onStopDb" text="Detener"/>
@@ -63,7 +71,8 @@
                         </HBox>
                         <HBox alignment="CENTER_LEFT" spacing="10.0">
                             <children>
-                                <Label text="Seguridad" prefWidth="220"/>
+                                <Label text="Seguridad" prefWidth="200"/>
+                                <Label fx:id="portSecurity" text=":8081" prefWidth="88" style="-fx-font-family: monospace; -fx-text-fill: #333;"/>
                                 <Label fx:id="statusSecurity" text="Detenido" prefWidth="110"/>
                                 <Button onAction="#onStartSecurity" text="Iniciar"/>
                                 <Button onAction="#onStopSecurity" text="Detener"/>
@@ -73,7 +82,8 @@
                         </HBox>
                         <HBox alignment="CENTER_LEFT" spacing="10.0">
                             <children>
-                                <Label text="Correos (SMTP)" prefWidth="220"/>
+                                <Label text="Correos (SMTP)" prefWidth="200"/>
+                                <Label fx:id="portSmtp" text=":8082" prefWidth="88" style="-fx-font-family: monospace; -fx-text-fill: #333;"/>
                                 <Label fx:id="statusSmtp" text="Detenido" prefWidth="110"/>
                                 <Button onAction="#onStartSmtp" text="Iniciar"/>
                                 <Button onAction="#onStopSmtp" text="Detener"/>
@@ -83,7 +93,8 @@
                         </HBox>
                         <HBox alignment="CENTER_LEFT" spacing="10.0">
                             <children>
-                                <Label text="Lógica Tienda" prefWidth="220"/>
+                                <Label text="Lógica Tienda" prefWidth="200"/>
+                                <Label fx:id="portStore" text=":8088" prefWidth="88" style="-fx-font-family: monospace; -fx-text-fill: #333;"/>
                                 <Label fx:id="statusStore" text="Detenido" prefWidth="110"/>
                                 <Button onAction="#onStartStore" text="Iniciar"/>
                                 <Button onAction="#onStopStore" text="Detener"/>
@@ -93,7 +104,8 @@
                         </HBox>
                         <HBox alignment="CENTER_LEFT" spacing="10.0">
                             <children>
-                                <Label text="Puente (correo banco)" prefWidth="220"/>
+                                <Label text="Puente (correo banco)" prefWidth="200"/>
+                                <Label fx:id="portPuente" text=":8095" prefWidth="88" style="-fx-font-family: monospace; -fx-text-fill: #333;"/>
                                 <Label fx:id="statusPuente" text="Detenido" prefWidth="110"/>
                                 <Button onAction="#onStartPuente" text="Iniciar"/>
                                 <Button onAction="#onStopPuente" text="Detener"/>
@@ -103,7 +115,8 @@
                         </HBox>
                         <HBox alignment="CENTER_LEFT" spacing="10.0">
                             <children>
-                                <Label text="Frontend" prefWidth="220"/>
+                                <Label text="Frontend" prefWidth="200"/>
+                                <Label fx:id="portFront" text=":4200" prefWidth="88" style="-fx-font-family: monospace; -fx-text-fill: #333;"/>
                                 <Label fx:id="statusFront" text="Detenido" prefWidth="110"/>
                                 <Button onAction="#onStartFront" text="Iniciar"/>
                                 <Button onAction="#onStopFront" text="Detener"/>
@@ -113,7 +126,8 @@
                         </HBox>
                         <HBox alignment="CENTER_LEFT" spacing="10.0">
                             <children>
-                                <Label text="Caddy (portero del túnel)" prefWidth="220"/>
+                                <Label text="Caddy (portero del túnel)" prefWidth="200"/>
+                                <Label fx:id="portCaddy" text=":8080" prefWidth="88" style="-fx-font-family: monospace; -fx-text-fill: #333;"/>
                                 <Label fx:id="statusCaddy" text="Detenido" prefWidth="110"/>
                                 <Button onAction="#onStartCaddy" text="Iniciar"/>
                                 <Button onAction="#onStopCaddy" text="Detener"/>
@@ -122,7 +136,8 @@
                         </HBox>
                         <HBox alignment="CENTER_LEFT" spacing="10.0">
                             <children>
-                                <Label text="Túnel Cloudflare" prefWidth="220"/>
+                                <Label text="Túnel Cloudflare" prefWidth="200"/>
+                                <Label fx:id="portTunnel" text=":46494" prefWidth="88" style="-fx-font-family: monospace; -fx-text-fill: #333;"/>
                                 <Label fx:id="statusTunnel" text="Detenido" prefWidth="110"/>
                                 <Button onAction="#onStartTunnel" text="Iniciar"/>
                                 <Button onAction="#onRestartTunnel" text="Reiniciar"/>
